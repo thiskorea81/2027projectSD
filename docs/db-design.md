@@ -409,7 +409,7 @@ erDiagram
 
 > 인덱스: `(user_id, state, notice_id)` — "내 할 일 목록" 조회용.
 
-**notice_attachment** — id PK, notice_id FK, file_path, file_name, size, mime
+**notice_attachment** — id PK, notice_id FK, file_path, file_name, size, mime (파일은 로컬 디스크 Docker 볼륨 `uploads`에 저장, 파일명은 무작위 ID로 바꿔 저장하고 원래 이름은 `file_name`에 보관)
 **notice_qna** — 안내에 붙는 추가 Q&A: id PK, notice_id FK, question text, answer text, source_question_id FK question?
 **recipient_group** / **recipient_group_member** — 저장된 수신 그룹(동적이면 `rule jsonb`, 정적이면 멤버 테이블)
 
@@ -532,4 +532,4 @@ erDiagram
 3. **임베딩 모델과 벡터 차원**: Mac mini 24GB 기준으로 bge-m3(1024차원) 가정. 실측 후 확정.
 4. ~~**학기 중 시간표 변경**~~ → **결정(2026-11-22): 교체만으로 충분.** 학기당 확정 시간표 1개.
 5. ~~**교사 계정 연도 이관**~~ → **결정(2026-11-22): 비활성화** (삭제하지 않고 이력 보존). 전입 교사는 새 계정 등록, 같은 이름이면 홍길동2… 규칙 적용.
-6. **첨부파일 저장소**: 로컬 디스크 볼륨으로 충분한지, MinIO(S3 호환) 컨테이너를 둘지?
+6. ~~**첨부파일 저장소**~~ → **결정(2026-11-22): 로컬 디스크(Docker 볼륨)로 충분.** 경로는 `notice_attachment.file_path`에 저장하고, 볼륨은 DB와 같은 주기로 NAS에 백업.
