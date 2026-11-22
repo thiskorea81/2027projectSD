@@ -1,9 +1,10 @@
 # 운영(학교 안 맥미니) 배포용 덮어쓰기 구성
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
-# 앱·DB 포트는 서버 바깥으로 열지 않습니다. 외부(집·휴대폰) 접속 방법은 .env 의 COMPOSE_PROFILES 로 고릅니다.
-#   COMPOSE_PROFILES=tunnel  → Cloudflare Tunnel (학교 방화벽 포트 개방 불필요, 권장)
-#   COMPOSE_PROFILES=caddy   → Caddy + 포트 80/443 개방 (학교에서 포트를 열어 줄 때)
+# 앱·DB 포트는 직접 열지 않고, 접속 방법은 .env 의 COMPOSE_PROFILES 로 고릅니다.
+#   COMPOSE_PROFILES=lan     → 1단계(현재): 교내망에서 http://맥미니IP 로 접속
+#   COMPOSE_PROFILES=tunnel  → 외부 공개: Cloudflare Tunnel (학교 방화벽 포트 개방 불필요)
+#   COMPOSE_PROFILES=caddy   → 외부 공개: Caddy + 포트 80/443 개방 (학교에서 포트를 열어 줄 때)
 services:
   app:
     build:
@@ -20,7 +21,19 @@ services:
   ollama:
     ports: !reset []
 
-  # ---------- 방법 A: Cloudflare Tunnel ----------
+  # ---------- 1단계: 교내망 IP 접속 ----------
+  caddy-lan:
+    image: caddy:2-alpine
+    profiles: ["lan"]
+    ports:
+      - "${LAN_PORT:-80}:80"
+    volumes:
+      - ./docker/Caddyfile.lan:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  # ---------- 외부 공개 방법 A: Cloudflare Tunnel ----------
   # 서버가 Cloudflare 로 "밖으로" 연결을 맺기 때문에 학교 방화벽에 구멍을 낼 필요가 없습니다.
   # HTTPS 인증서도 Cloudflare 가 처리합니다. 토큰 발급 방법은 README 참고.
   cloudflared:
@@ -33,7 +46,7 @@ services:
       - app
     restart: unless-stopped
 
-  # ---------- 방법 B: Caddy (HTTPS 인증서 자동 발급·갱신) ----------
+  # ---------- 외부 공개 방법 B: Caddy (HTTPS 인증서 자동 발급·갱신) ----------
   # 도메인이 이 서버의 공인 IP 를 가리키고, 80/443 포트가 외부에서 열려 있어야 합니다.
   caddy:
     image: caddy:2-alpine

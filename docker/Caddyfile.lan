@@ -1,0 +1,14 @@
+# 1단계: 교내망에서 IP 주소로 접속 (http://맥미니IP)
+# 학교 안에서만 쓰는 임시 단계입니다. 외부 공개 시에는 터널(tunnel) 또는 Caddyfile(caddy) 방식으로 바꿉니다.
+:80 {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy app:3000
+}

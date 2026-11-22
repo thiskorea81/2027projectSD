@@ -5,7 +5,7 @@
 - 웹 앱: Next.js (TypeScript)
 - 데이터베이스: PostgreSQL 17
 - AI: Ollama (로컬 언어 모델, 외부 AI API 사용 안 함)
-- 외부 접속: Cloudflare Tunnel 또는 Caddy (HTTPS) — 학교 안 서버에 집·휴대폰에서도 접속
+- 접속: 1단계는 교내망 IP 접속, 이후 Cloudflare Tunnel 또는 Caddy(HTTPS)로 외부 공개
 - 웹·DB·백업은 Docker 로 실행되므로, 다른 컴퓨터로 옮겨도 같은 환경이 그대로 재현됩니다.
 
 ## 서버 구성 (맥미니 24GB 한 대)
@@ -14,7 +14,8 @@
 
 - **Docker Desktop** (VM 메모리 6~8GB): `cloudflared` 또는 `caddy` → `app` → `db` ← `db-backup`
 - **맥에 직접 설치한 Ollama** (Metal GPU 사용): `app` 이 `host.docker.internal:11434` 로 접속
-- 집·휴대폰 → (HTTPS) → `cloudflared`/`caddy` → `app`
+- 1단계: 교내 PC·휴대폰 → (http) → `caddy-lan` → `app`
+- 외부 공개 후: 집·휴대폰 → (HTTPS) → `cloudflared`/`caddy` → `app`
 
 **왜 Ollama 만 Docker 밖에 두나요?** 맥용 Docker 는 맥의 GPU(Metal)를 쓰지 못합니다.
 컨테이너 안에서 AI 를 돌리면 CPU 로만 돌아 매우 느리기 때문에, Ollama 는 맥에 직접 설치하고
@@ -37,7 +38,8 @@
 | `db` | PostgreSQL | `localhost:5432` (이 컴퓨터에서만) |
 | `db-backup` | DB 자동 백업 (기본 24시간마다, 14일 보관) | `./backups` 폴더 |
 | Ollama (맥 네이티브) | 로컬 AI | http://localhost:11434 |
-| `cloudflared` / `caddy` | 외부 접속 (운영 배포 시에만, 둘 중 하나) | https://도메인 |
+| `caddy-lan` | 1단계 교내망 접속 (운영 배포 시) | http://맥미니IP |
+| `cloudflared` / `caddy` | 외부 공개 (나중, 둘 중 하나) | https://도메인 |
 | `adminer` | 웹 DB 관리 도구 (선택) | http://localhost:8080 |
 
 ## 준비물
@@ -127,10 +129,34 @@ sh scripts/db-restore.sh backups/db-20261122-130000.sql.gz
 ```
 현재 DB 의 테이블을 백업 시점 내용으로 덮어씁니다.
 
-## 운영 배포 (학교 안 맥미니, 집·휴대폰에서 접속)
+## 운영 배포 (학교 안 맥미니)
 
-서버는 학교 안에 둡니다. 외부에서 접속하는 방법은 두 가지이고, `.env` 의 `COMPOSE_PROFILES` 로 고릅니다.
-어느 쪽이든 앱·DB 포트는 외부에 열지 않고, `POSTGRES_PASSWORD` 는 강한 값으로 바꾸세요.
+서버는 학교 안에 둡니다. 접속 방법은 `.env` 의 `COMPOSE_PROFILES` 로 고르며, 어느 쪽이든 앱·DB 포트는 직접 열지 않습니다.
+`POSTGRES_PASSWORD` 는 강한 값으로 바꾸세요.
+
+| 단계 | `COMPOSE_PROFILES` | 접속 주소 |
+| --- | --- | --- |
+| **1단계 (현재)**: 교내망에서만 | `lan` | `http://맥미니IP` |
+| 외부 공개 (나중) | `tunnel` 또는 `caddy` | `https://도메인` |
+
+### 1단계: 교내망에서 IP 주소로 접속 (기본값)
+
+1. 맥미니에 **고정 IP** 를 지정합니다. (시스템 설정 → 네트워크 → 이더넷 → 세부사항 → TCP/IP → "수동", 또는 학교 전산 담당에게 고정 IP 요청)
+2. `.env` 는 기본값 그대로 `COMPOSE_PROFILES=lan` 입니다.
+3. 실행:
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+   ```
+4. 교내 PC·휴대폰(학교 와이파이)에서 `http://맥미니IP` 로 접속합니다. 80 포트를 다른 프로그램이 쓰고 있으면 `LAN_PORT` 를 바꾸고 `http://맥미니IP:포트` 로 접속합니다.
+
+> **주의**
+> - 이 단계는 http(암호화 없음)라 같은 학교 망 안에서는 통신 내용이 보일 수 있습니다. 민감한 정보는 외부 공개(HTTPS) 단계 전까지 다루지 않는 것이 좋습니다.
+> - **Google 로그인은 IP 주소 접속에서는 쓸 수 없습니다.** Google 은 로그인 후 돌아올 주소로 IP 주소나 http 를 허용하지 않기 때문입니다(localhost 제외). 1단계에서 Google 로그인을 쓰려면 도메인이 필요합니다. 도메인이 맥미니의 교내 IP 를 가리키게 하고 인증서를 DNS 방식으로 받는 구성으로 바꿀 수 있습니다.
+> - macOS 방화벽이 켜져 있으면 Docker 의 수신 연결을 허용해야 합니다.
+
+## 외부 공개 (나중 단계)
+
+외부에서 접속하는 방법은 두 가지입니다.
 
 ### 방법 A: Cloudflare Tunnel (권장 — 학교 방화벽 포트 개방 불필요)
 
@@ -138,7 +164,7 @@ sh scripts/db-restore.sh backups/db-20261122-130000.sql.gz
 
 1. 도메인 하나를 준비해 Cloudflare(무료 요금제)에 등록합니다.
 2. Cloudflare 대시보드 → Zero Trust → Networks → Tunnels → **Create a tunnel** (Cloudflared 선택)
-3. 설치 화면에 나오는 **토큰**을 복사해 `.env` 에 넣습니다.
+3. 설치 화면에 나오는 **토큰**을 복사해 `.env` 에 넣습니다. (`lan` 을 `tunnel` 로 바꿈)
    ```
    COMPOSE_PROFILES=tunnel
    CLOUDFLARE_TUNNEL_TOKEN=eyJ...
@@ -155,7 +181,7 @@ sh scripts/db-restore.sh backups/db-20261122-130000.sql.gz
 ### 방법 B: Caddy + 포트 개방 (학교에서 80/443 포트를 열어 줄 때)
 
 1. 도메인을 학교 공인 IP 로 연결(DNS A 레코드)하고, 학교 방화벽에서 80·443 포트를 맥미니로 포워딩합니다.
-2. `.env`:
+2. `.env` (`lan` 을 `caddy` 로 바꿈):
    ```
    COMPOSE_PROFILES=caddy
    DOMAIN=notice.myschool.kr
@@ -163,13 +189,13 @@ sh scripts/db-restore.sh backups/db-20261122-130000.sql.gz
 3. 실행: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`
    Caddy 가 Let's Encrypt 인증서를 자동으로 받고 갱신하며, http 는 https 로 자동 이동합니다.
 
-### 공통
+### 외부 공개 공통
 - 앱은 최적화된 운영 이미지(일반 사용자 권한)로 실행됩니다.
 - 모든 컨테이너는 `restart: unless-stopped` 라 Docker 가 다시 켜지면 자동으로 올라옵니다.
 - 자동 백업은 그대로 동작합니다.
 - 로그인은 학교 Google Workspace 계정으로 붙일 예정입니다 (별도 작업).
 
-### 3. 맥미니를 24시간 서버로 쓰기 위한 설정
+## 맥미니를 24시간 서버로 쓰기 위한 설정
 - 시스템 설정 → 에너지: **"디스플레이가 꺼져 있을 때 자동으로 잠자기 방지"** 켜기, **"정전 후 자동으로 시동"** 켜기
 - Docker Desktop → Settings → General: **"Start Docker Desktop when you sign in"** 켜기
 - Ollama 앱: 로그인 시 자동 실행 (기본값)
