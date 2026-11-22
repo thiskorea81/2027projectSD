@@ -12,7 +12,7 @@
 
 맥미니 한 대가 웹·DB·AI·백업을 모두 돌립니다.
 
-- **Docker Desktop** (VM 메모리 6~8GB): `cloudflared` 또는 `caddy` → `app` → `db` ← `db-backup`
+- **Docker Desktop** (VM 메모리 6~8GB): `caddy-lan` → `app` → `db` ← `db-backup`, 야간 `worker`
 - **맥에 직접 설치한 Ollama** (Metal GPU 사용): `app` 이 `host.docker.internal:11434` 로 접속
 - 1단계: 교내 PC·휴대폰 → (http) → `caddy-lan` → `app`
 - 외부 공개 후: 집·휴대폰 → (HTTPS) → `cloudflared`/`caddy` → `app`
@@ -36,7 +36,8 @@
 | --- | --- | --- |
 | `app` | 웹 앱 (개발 모드, 코드 수정 시 자동 반영) | http://localhost:3000 |
 | `db` | PostgreSQL 17 + pgvector | `localhost:5432` (이 컴퓨터에서만) |
-| `db-backup` | DB 자동 백업 (기본 24시간마다, 14일 보관) | `./backups` 폴더 |
+| `db-backup` | 자동 백업 (매일 03:00, DB + 첨부파일·공문 NAS 동기화) | `./backups` 폴더, NAS |
+| `worker` | 야간 작업 (18:00~08:00 공문 처리, 월간 정리) | 로그: `docker compose logs worker` |
 | Ollama (맥 네이티브) | 로컬 AI | http://localhost:11434 |
 | `caddy-lan` | 1단계 교내망 접속 (운영 배포 시) | http://맥미니IP |
 | `cloudflared` / `caddy` | 외부 공개 (나중, 둘 중 하나) | https://도메인 |
@@ -80,15 +81,36 @@ ollama list                          # 받은 AI 모델 목록
 
 > `docker compose down -v` 는 **DB 데이터까지 삭제**합니다. 꼭 백업 후에만 쓰세요.
 
+## 데이터 폴더
+
+| 폴더 (`.env`) | 기본값 | 내용 | 연결 |
+| --- | --- | --- | --- |
+| `UPLOADS_DIR` | `./data/uploads` | 메신저에 올린 첨부파일 | 앱 읽기·쓰기 |
+| `DOCUMENTS_DIR` | `./data/documents` | 부서별 공문서 폴더 (예: `교무부/`, `학생부/`) | 앱 읽기 전용, 워커 읽기·쓰기 |
+
+맥미니의 로컬 디스크에 그대로 저장되는 일반 폴더라, Finder 에서 바로 보거나 SMB 로 공유할 수 있습니다.
+
+## 야간 작업 (워커)
+
+`worker` 컨테이너는 **업무시간 외(기본 18:00~08:00)에만** 동작합니다.
+
+- **공문 처리**: `WORKER_INTERVAL_MINUTES`(기본 10분)마다 부서 공문 폴더를 확인해, 로컬 AI 로 업무 분류·담당자 지정 등을 처리합니다. (지금은 부서별 문서 수를 세는 뼈대만 있고, 처리 로직은 `worker/index.ts` 에 개발 예정)
+- **월간 정리**: 매달 `CLEANUP_DAY_OF_MONTH`(기본 1일) 이후 첫 야간에 한 번, **기한이 남은 미처리 업무를 뺀 불필요한 자료**를 지워 저장 공간을 아낍니다. 처음에는 `CLEANUP_DRY_RUN=true`(시험 모드)로 지울 대상만 기록하고, 규칙을 확인한 뒤 `false` 로 바꾸세요.
+- 지워진 파일은 NAS 의 `documents-deleted/`, `uploads-deleted/` 에 `NAS_DELETED_KEEP_DAYS`(기본 90일) 동안 남아 있어, 실수로 지워도 되살릴 수 있습니다.
+- 시간대는 `.env` 의 `WORKER_ACTIVE_FROM`, `WORKER_ACTIVE_UNTIL` 로 바꿉니다.
+
 ## 백업과 복원
 
 ### 자동 백업 (맥미니 + NAS 이중 저장)
-`db-backup` 서비스가 켜질 때 한 번, 그 뒤 `BACKUP_INTERVAL_HOURS`(기본 24) 시간마다 백업합니다.
+`db-backup` 서비스가 켜질 때 한 번, 그 뒤 매일 `BACKUP_TIME`(기본 03:00)에 백업합니다.
 
-| 위치 | 설정 | 보관 기간 |
+| 대상 | 맥미니 | NAS |
 | --- | --- | --- |
-| 1차: 맥미니 안 | `BACKUP_DIR` (기본 `./backups`) | `BACKUP_KEEP_DAYS` (기본 14일) |
-| 2차: NAS | `NAS_BACKUP_DIR` | `NAS_BACKUP_KEEP_DAYS` (기본 90일) |
+| DB | `BACKUP_DIR`(기본 `./backups`)에 `.sql.gz` | 같은 파일 복사 |
+| 첨부파일·부서 공문 | 원본이 맥미니에 있음 | `uploads/`, `documents/` 로 동기화 (바뀐 파일만 복사) |
+
+- **DB 백업 보관**: 최근 7일치 + 일요일분 4주 + 매달 1일분 3개월 (최대 약 90일, `BACKUP_KEEP_DAILY/WEEKLY/MONTHLY`)
+- **원본에서 지워진 첨부파일·공문**: NAS 의 `*-deleted/날짜/` 에 90일 보관 후 삭제 (`NAS_DELETED_KEEP_DAYS`)
 
 맥미니가 고장 나도 NAS 에 백업이 남아 있도록, 운영 서버에서는 꼭 NAS 를 연결하세요.
 
@@ -212,6 +234,7 @@ sh scripts/db-restore.sh backups/db-20261122-130000.sql.gz
 2. 다음 두 가지를 새 컴퓨터로 가져갑니다. (Git 에는 올라가지 않는 파일들)
    - `.env`
    - 방금 만든 백업 파일 (NAS 에도 복사되어 있으므로 새 컴퓨터에서 NAS 를 연결해 바로 가져와도 됩니다)
+   - `data/` 폴더 (첨부파일·부서 공문). NAS 의 `uploads/`, `documents/` 를 새 컴퓨터의 `data/uploads/`, `data/documents/` 로 복사해도 됩니다.
 3. **새 컴퓨터에서** Docker Desktop, Ollama, Git 을 설치하고 (Docker 메모리 6~8GB 설정), 위 "NAS 연결하기"의 2~3단계를 해 둡니다:
    ```bash
    ollama pull gemma3:12b            # AI 모델은 다시 받기
@@ -244,7 +267,9 @@ Windows 에서 `scripts/*.sh` 는 Git Bash 또는 WSL 터미널에서 실행하�
 - **`/api/health` 에서 `ai.status` 가 unreachable**: 맥에서 Ollama 앱이 실행 중인지 확인 (`ollama list`).
 - **`ai.modelReady` 가 false**: `ollama pull <.env 의 OLLAMA_MODEL>` 을 실행하세요. 앱 자체는 모델 없이도 동작합니다.
 - **로그에 `NAS 미연결` 경고**: Finder 에서 NAS 공유 폴더가 마운트되어 있는지, `NAS_BACKUP_DIR` 안에 `.school-notice-backup` 파일이 있는지 확인.
-- **맥미니가 고장 났을 때**: 새 컴퓨터에서 NAS 의 가장 최근 `db-*.sql.gz` 로 `sh scripts/db-restore.sh` 를 실행하세요.
+- **맥미니가 고장 났을 때**: 새 컴퓨터에서 NAS 의 가장 최근 `db-*.sql.gz` 로 `sh scripts/db-restore.sh` 를 실행하고, NAS 의 `uploads/`, `documents/` 를 `data/` 아래로 복사하세요.
+- **실수로 지운 첨부파일·공문**: NAS 의 `uploads-deleted/`, `documents-deleted/` 의 날짜 폴더에서 찾아 원래 위치로 복사하세요.
+- **Linux 서버에서 운영 시 첨부파일 저장 오류**: 운영 컨테이너는 uid 1000 으로 실행되므로 `sudo chown -R 1000:1000 data/` 를 실행하세요.
 - **포트가 이미 사용 중**: `.env` 에서 `APP_PORT`, `DB_PORT` 등을 다른 번호로 바꾸고 `docker compose up -d`.
 - **코드를 고쳐도 화면이 안 바뀜**: `.env` 에서 `WATCHPACK_POLLING=true` 후 `docker compose up -d`.
 - **패키지가 꼬였을 때**: `docker compose down && docker volume rm school-notice_node_modules && docker compose up -d`

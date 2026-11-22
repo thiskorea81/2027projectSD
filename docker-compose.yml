@@ -12,6 +12,10 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       # 기본: 맥미니(호스트)에서 직접 실행 중인 Ollama. 컨테이너 Ollama 를 쓰면 .env 에서 바꿉니다.
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      # 첨부파일 저장 위치 (컨테이너 안 경로). 실제 파일은 맥미니의 UPLOADS_DIR 폴더에 저장됩니다.
+      UPLOAD_DIR: /data/uploads
+      # 부서별 공문서 폴더 (읽기 전용)
+      DOCUMENTS_DIR: /data/documents
     extra_hosts:
       # Linux 에서도 host.docker.internal 이 동작하도록 (Mac/Windows 는 기본 제공)
       - "host.docker.internal:host-gateway"
@@ -21,6 +25,8 @@ services:
       - .:/app
       - node_modules:/app/node_modules
       - next_cache:/app/.next
+      - ${UPLOADS_DIR:-./data/uploads}:/data/uploads
+      - ${DOCUMENTS_DIR:-./data/documents}:/data/documents:ro
     depends_on:
       db:
         condition: service_healthy
@@ -46,8 +52,8 @@ services:
     restart: unless-stopped
 
   # ---------- DB 자동 백업 ----------
-  # 시작 시 1회 + BACKUP_INTERVAL_HOURS 마다 BACKUP_DIR(맥미니) 에 .sql.gz 를 남기고,
-  # NAS_BACKUP_DIR 이 설정되어 있으면 NAS 에도 복사합니다.
+  # 시작 시 1회 + 매일 BACKUP_TIME(기본 03:00)에 BACKUP_DIR(맥미니) 에 DB 백업(.sql.gz)을 남기고,
+  # NAS_BACKUP_DIR 이 설정되어 있으면 DB 백업 복사 + 첨부파일 동기화를 NAS 에 합니다.
   db-backup:
     image: pgvector/pgvector:pg17
     env_file: .env
@@ -58,9 +64,43 @@ services:
       - ./docker/backup-loop.sh:/backup-loop.sh:ro
       - ${BACKUP_DIR:-./backups}:/backups
       - ${NAS_BACKUP_DIR:-./backups/.nas-unset}:/nas
+      - ${UPLOADS_DIR:-./data/uploads}:/uploads:ro
+      - ${DOCUMENTS_DIR:-./data/documents}:/documents:ro
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+
+  # ---------- 야간 작업 워커 ----------
+  # 업무시간 외(WORKER_ACTIVE_FROM ~ WORKER_ACTIVE_UNTIL, 기본 18:00~08:00)에만
+  # 부서 공문 폴더의 새 문서를 로컬 AI 로 분류·담당자 지정 등 처리하고, 월 1회 불필요한 자료를 정리합니다.
+  # (정리 때문에 워커만 공문 폴더 쓰기 권한을 가집니다. 앱은 읽기 전용. 처리 로직은 worker/ 에서 개발)
+  worker:
+    build:
+      context: .
+      target: dev
+    env_file: .env
+    environment:
+      TZ: Asia/Seoul
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      UPLOAD_DIR: /data/uploads
+      DOCUMENTS_DIR: /data/documents
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # 의존성 설치는 app 컨테이너가 하므로, 설치가 끝날 때까지 기다렸다가 시작합니다.
+    entrypoint: ["sh", "-c", "until [ -f node_modules/.package-lock.sha256 ]; do sleep 2; done; exec \"$$@\"", "--"]
+    command: ["npm", "run", "worker"]
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - ${UPLOADS_DIR:-./data/uploads}:/data/uploads
+      - ${DOCUMENTS_DIR:-./data/documents}:/data/documents
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
     restart: unless-stopped
 
   # ---------- 로컬 AI 서버 (Ollama, 컨테이너판 · 선택) ----------

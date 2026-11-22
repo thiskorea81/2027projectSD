@@ -28,6 +28,16 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
+# ---------- worker: 야간 작업 워커 운영 이미지 ----------
+FROM base AS worker
+ENV NODE_ENV=production TZ=Asia/Seoul
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node package.json ./
+COPY --chown=node:node lib ./lib
+COPY --chown=node:node worker ./worker
+USER node
+CMD ["node", "worker/index.ts"]
+
 # ---------- prod: 최종 운영 이미지 ----------
 FROM node:${NODE_VERSION} AS prod
 WORKDIR /app

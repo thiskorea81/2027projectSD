@@ -12,8 +12,22 @@ services:
     environment:
       NODE_ENV: production
     ports: !reset []
-    volumes: !reset []
+    # 운영에서는 소스 코드를 마운트하지 않고, 첨부파일 폴더만 연결합니다.
+    volumes: !override
+      - ${UPLOADS_DIR:-./data/uploads}:/data/uploads
+      - ${DOCUMENTS_DIR:-./data/documents}:/data/documents:ro
     restart: unless-stopped
+
+  worker:
+    build:
+      target: worker
+    environment:
+      NODE_ENV: production
+    entrypoint: !reset null
+    command: !reset null
+    volumes: !override
+      - ${UPLOADS_DIR:-./data/uploads}:/data/uploads
+      - ${DOCUMENTS_DIR:-./data/documents}:/data/documents
 
   db:
     ports: !reset []
