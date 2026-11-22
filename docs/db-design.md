@@ -419,6 +419,11 @@ erDiagram
 | fetched_at | timestamptz | |
 | UQ | (meal_date, meal_type) | |
 
+**neis_timetable** — NEIS 시간표 수집본(대조용, 원본 아님)
+| id PK | date | grade smallint | class_no smallint | period_no smallint | subject_name text | fetched_at timestamptz | UQ(date, grade, class_no, period_no) |
+
+> 뷰 `v_timetable_neis_diff(date)`: `v_daily_timetable`과 비교해 과목이 다른 칸 목록.
+
 **allergen** — 알레르기 번호표: code smallint PK, name text (1 난류, 2 우유, …)
 
 ### 4.10 학사일정
@@ -488,7 +493,7 @@ erDiagram
 
 **backup_run** — id PK, kind (`daily`/`weekly`/`monthly`/`restore_test`), started_at, finished_at, status, file_path, size_bytes, checksum, offsite_copied boolean, error text?
 
-**external_sync_run** — NEIS 등 외부 수집 기록: id PK, source (`neis_meal`, `neis_calendar`), started_at, status, rows, error
+**external_sync_run** — NEIS 등 외부 수집 기록: id PK, source (`neis_meal`, `neis_calendar`, `neis_timetable`), started_at, status, rows, error
 
 **app_setting** — key text PK, value jsonb (자동 분류 신뢰도 임계값, 미확인 시 자동 발송 대기 시간, LLM 임계값, NEIS 코드 등)
 
@@ -505,7 +510,7 @@ erDiagram
 
 ## 6. 백업·복구 설계
 
-- `worker` 컨테이너의 cron이 `pg_dump -Fc`로 매일 새벽 백업 → 백업 볼륨 저장 → 외부 저장소로 복사 → `backup_run`에 기록.
+- `worker` 컨테이너의 cron이 `pg_dump -Fc`로 매일 새벽 백업 → 백업 볼륨 저장 → 암호화 → 학교 NAS로 복사 → `backup_run`에 기록.
 - 보관: 일간 7개, 주간 4개, 월간 12개(오래된 것 자동 정리).
 - 업로드 파일(`notice_attachment`) 디렉터리도 같은 주기로 압축 백업.
 - 월 1회 자동 복원 테스트: 임시 DB 컨테이너에 최신 백업 복원 → 주요 테이블 행 수·체크섬 비교 → `backup_run(kind='restore_test')` 기록.
