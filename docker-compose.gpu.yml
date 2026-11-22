@@ -1,0 +1,12 @@
+# NVIDIA 그래픽카드가 있는 컴퓨터에서 AI 를 GPU 로 돌릴 때 덧붙이는 구성
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# (Linux 는 NVIDIA Container Toolkit, Windows 는 Docker Desktop + WSL2 + 최신 NVIDIA 드라이버 필요)
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -1,0 +1,86 @@
+# 개발용 구성: docker compose up
+name: school-notice
+
+services:
+  # ---------- 웹 앱 (Next.js) ----------
+  app:
+    build:
+      context: .
+      target: dev
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      OLLAMA_URL: http://ollama:11434
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - next_cache:/app/.next
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ---------- 데이터베이스 (PostgreSQL) ----------
+  db:
+    image: postgres:17-alpine
+    env_file: .env
+    environment:
+      TZ: Asia/Seoul
+      PGTZ: Asia/Seoul
+    ports:
+      # 호스트의 DB 도구로 접속할 때 사용. 이 컴퓨터에서만 접속 가능하게 묶어 둡니다.
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------- DB 자동 백업 ----------
+  # 시작 시 1회 + BACKUP_INTERVAL_HOURS 마다 BACKUP_DIR 에 .sql.gz 파일을 남깁니다.
+  db-backup:
+    image: postgres:17-alpine
+    env_file: .env
+    environment:
+      TZ: Asia/Seoul
+    entrypoint: ["sh", "/backup-loop.sh"]
+    volumes:
+      - ./docker/backup-loop.sh:/backup-loop.sh:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------- 로컬 AI 서버 (Ollama) ----------
+  # 외부 AI API 를 쓰지 않고 이 컴퓨터 안에서 언어 모델을 돌립니다.
+  # 모델 받기: docker compose exec ollama ollama pull ${OLLAMA_MODEL}
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  # ---------- 웹 DB 관리 도구 (선택) ----------
+  # docker compose --profile tools up -d adminer
+  adminer:
+    image: adminer:5
+    profiles: ["tools"]
+    ports:
+      - "127.0.0.1:${ADMINER_PORT:-8080}:8080"
+    depends_on:
+      - db
+
+volumes:
+  db_data:
+  ollama_data:
+  node_modules:
+  next_cache:

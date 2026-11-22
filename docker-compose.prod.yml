@@ -1,0 +1,13 @@
+# 운영(학교 서버 등) 배포용 덮어쓰기 구성
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+services:
+  app:
+    build:
+      target: prod
+    environment:
+      NODE_ENV: production
+    volumes: !reset []
+    restart: unless-stopped
+
+  db:
+    ports: !reset []
