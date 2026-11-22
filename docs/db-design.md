@@ -135,10 +135,11 @@ erDiagram
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | id | bigint PK | |
-| login_id | text UQ | |
-| password_hash | text? | 외부 인증 연동 시 NULL |
+| email | text UQ | Google Workspace 계정 이메일(로그인 식별자) |
+| google_sub | text? UQ | Google 계정 고유 ID(OIDC `sub`), 첫 로그인 시 저장 |
+| password_hash | text? | 비상용 로컬 관리자만 사용, 그 외 NULL |
 | name | text | |
-| email, phone | text? | |
+| phone | text? | |
 | main_subject_id | FK subject? | 주 담당 교과 |
 | max_weekly_hours | smallint? | 주당 최대 시수 |
 | is_active | boolean | |
