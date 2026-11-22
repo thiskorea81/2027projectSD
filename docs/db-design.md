@@ -198,8 +198,8 @@ erDiagram
 | weekly_hours | smallint | 주당 시수 |
 | room_type | text? | 필요 교실 유형 |
 | default_room_id | FK room? | |
-| max_daily_hours | smallint | 하루 최대 시수(기본 1~2) |
-| consecutive_rule | text | `none`, `prefer_double`, `require_double` |
+| max_daily_hours | smallint | 하루 최대 시수(기본 1, 블록타임 과목은 2) |
+| consecutive_rule | text | `none`, `prefer_double`, `require_double`(과학탐구실험·블록타임 과목). 하루 2시간이면 연속 필수 |
 
 **section_teacher** — (section_id, user_id) PK, `hours_share smallint?` (공동 수업·시수 분할)
 
@@ -231,6 +231,8 @@ erDiagram
 
 **period** — 교시 정의
 | id PK | schedule_id FK | period_no smallint | start_time time | end_time time | is_class boolean (점심·조회 구분) |
+
+**weekday_period_count** — 요일별 교시 수: (schedule_id, day_of_week) PK, period_count smallint (기본 시정: 월·화·목·금 7, 수 4)
 
 **day_period_override** — 특정 날짜의 시정 변경 (date PK, schedule_id FK, note)
 
