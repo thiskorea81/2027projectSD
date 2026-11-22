@@ -25,9 +25,9 @@ services:
       db:
         condition: service_healthy
 
-  # ---------- 데이터베이스 (PostgreSQL) ----------
+  # ---------- 데이터베이스 (PostgreSQL 17 + pgvector) ----------
   db:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     env_file: .env
     environment:
       TZ: Asia/Seoul
@@ -37,6 +37,7 @@ services:
       - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+      - ./docker/db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -48,7 +49,7 @@ services:
   # 시작 시 1회 + BACKUP_INTERVAL_HOURS 마다 BACKUP_DIR(맥미니) 에 .sql.gz 를 남기고,
   # NAS_BACKUP_DIR 이 설정되어 있으면 NAS 에도 복사합니다.
   db-backup:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     env_file: .env
     environment:
       TZ: Asia/Seoul

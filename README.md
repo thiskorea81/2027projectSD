@@ -3,7 +3,7 @@
 교사들에게 일괄로 뿌려지는 메신저 대신, 꼭 필요한 사람에게 필요한 할 일만 전달하기 위한 시스템입니다.
 
 - 웹 앱: Next.js (TypeScript)
-- 데이터베이스: PostgreSQL 17
+- 데이터베이스: PostgreSQL 17 + pgvector (AI 임베딩 검색)
 - AI: Ollama (로컬 언어 모델, 외부 AI API 사용 안 함)
 - 접속: 1단계는 교내망 IP 접속, 이후 Cloudflare Tunnel 또는 Caddy(HTTPS)로 외부 공개
 - 웹·DB·백업은 Docker 로 실행되므로, 다른 컴퓨터로 옮겨도 같은 환경이 그대로 재현됩니다.
@@ -35,7 +35,7 @@
 | 서비스 | 역할 | 개발 중 주소 |
 | --- | --- | --- |
 | `app` | 웹 앱 (개발 모드, 코드 수정 시 자동 반영) | http://localhost:3000 |
-| `db` | PostgreSQL | `localhost:5432` (이 컴퓨터에서만) |
+| `db` | PostgreSQL 17 + pgvector | `localhost:5432` (이 컴퓨터에서만) |
 | `db-backup` | DB 자동 백업 (기본 24시간마다, 14일 보관) | `./backups` 폴더 |
 | Ollama (맥 네이티브) | 로컬 AI | http://localhost:11434 |
 | `caddy-lan` | 1단계 교내망 접속 (운영 배포 시) | http://맥미니IP |
