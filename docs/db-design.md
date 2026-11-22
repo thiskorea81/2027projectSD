@@ -445,6 +445,7 @@ erDiagram
 | feedback_irrelevant | boolean | 수신자가 "나와 관계없음"을 눌렀는지(분류 학습용) |
 | read_at, done_at | timestamptz? | |
 | last_reminded_at | timestamptz? | |
+| acknowledged_at | timestamptz? | 긴급·중요 안내를 블러 확인 화면에서 확인한 시각 |
 
 > 인덱스: `(user_id, state, notice_id)` — "내 할 일 목록" 조회용.
 
@@ -637,7 +638,7 @@ erDiagram
 | closed_reason | text? | |
 | opened_at, closed_at | timestamptz | |
 
-**critical_case_alert** — 수신자별 알림: (case_id, user_id) PK, notified_at, read_at?, channel (`screen`, `push`)
+**critical_case_alert** — 수신자별 알림: (case_id, user_id) PK, notified_at, acknowledged_at? (블러 화면에서 "확인" 누른 시각), channel (`screen`, `push`)
 
 **crisis_recipient** — 위기대응 수신자 설정
 | id PK | user_id FK | title_label text (학교별 직책명, 예: 생활안전부장) | categories text[]? (NULL이면 모든 유형) | phone text? (고지 화면 연락처 표시용) | is_active |
