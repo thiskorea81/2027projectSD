@@ -149,7 +149,7 @@ erDiagram
 | phone | text? | |
 | main_subject_id | FK subject? | 주 담당 교과 |
 | max_weekly_hours | smallint? | 주당 최대 시수 |
-| is_active | boolean | |
+| is_active | boolean | 전출·퇴직 시 false(삭제하지 않음). 비활성 계정은 로그인 불가, 수신자·담당자 후보에서 제외, 과거 기록에는 이름 유지 |
 
 **department** — 부서 (교무부, 학생부, 과학과 등; `kind`로 행정부서/교과협의회 구분)
 | id PK | name | kind (`admin`/`subject`) | parent_id FK department? |
@@ -253,12 +253,11 @@ erDiagram
 | term_id | FK term | |
 | name | text | 예: "1차 편성안", "확정본" |
 | status | text | `draft`, `confirmed`, `archived` |
-| effective_from | date? | 확정 시 적용 시작일 (학기 중 시간표 변경 대비) |
 | source | text | `solver`, `manual`, `import` |
 | created_by | FK app_user | |
 | confirmed_at | timestamptz? | |
 
-> 같은 학기에 `confirmed`이면서 기간이 겹치는 버전은 하나만(트리거로 검증).
+> 같은 학기에 `confirmed` 버전은 하나만(부분 유니크 인덱스). 학기 중 변경은 기본 시간표를 바꾸지 않고 교체(`substitution`)로만 처리한다(2026-11-22 확정).
 
 **timetable_slot** — 기본 시간표 한 칸
 | 컬럼 | 타입 | 설명 |
@@ -531,6 +530,6 @@ erDiagram
 1. ~~**ORM/마이그레이션 도구**~~ → **결정(2026-11-22): Prisma + raw SQL 마이그레이션 병행** (§1).
 2. ~~**학생 데이터 범위**~~ → **결정(2026-11-22): 학번만 저장, 이름은 저장하지 않음** (§4.2).
 3. **임베딩 모델과 벡터 차원**: Mac mini 24GB 기준으로 bge-m3(1024차원) 가정. 실측 후 확정.
-4. **학기 중 시간표 변경**: 학기 중간에 기본 시간표가 바뀌는 경우(`effective_from`)가 실제로 있는지, 아니면 교체만으로 충분한지?
-5. **교사 계정 연도 이관**: 전출입 교사 처리 방식(계정 비활성화 vs 삭제) — 이력 보존을 위해 비활성화를 기본값으로 제안.
+4. ~~**학기 중 시간표 변경**~~ → **결정(2026-11-22): 교체만으로 충분.** 학기당 확정 시간표 1개.
+5. ~~**교사 계정 연도 이관**~~ → **결정(2026-11-22): 비활성화** (삭제하지 않고 이력 보존). 전입 교사는 새 계정 등록, 같은 이름이면 홍길동2… 규칙 적용.
 6. **첨부파일 저장소**: 로컬 디스크 볼륨으로 충분한지, MinIO(S3 호환) 컨테이너를 둘지?
