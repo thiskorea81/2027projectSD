@@ -35,6 +35,7 @@
 | 질문 라우팅 | `question`, `question_routing`, `answer`, `faq`, `topic_owner`, `document_chunk` |
 | 알림 | `notification`, `notification_preference` |
 | 공문 자동 처리 | `doc_folder`, `official_document`, `doc_analysis`, `doc_category`, `duty_assignment`, `doc_assignment`, `doc_action` |
+| 상담·민원 | `counseling_record`, `counseling_share`, `complaint`, `risk_assessment`, `critical_case`, `critical_case_alert`, `crisis_recipient`, `risk_keyword`, `sensitive_access_log` |
 | 운영 | `audit_log`, `backup_run`, `app_setting`, `external_sync_run`, `batch_job`, `retention_run`, `retention_hold` |
 
 ## 3. ERD
@@ -128,6 +129,24 @@ erDiagram
   doc_action }o--o| notice : "creates"
   doc_action }o--o| calendar_event : "creates"
   official_document ||--o{ document_chunk : "indexed as"
+```
+
+### 3.5 상담·민원
+
+```mermaid
+erDiagram
+  app_user ||--o{ counseling_record : writes
+  student ||--o{ counseling_record : about
+  counseling_record ||--o{ counseling_share : "shared with"
+  app_user ||--o{ counseling_share : ""
+  app_user ||--o{ complaint : receives
+  counseling_record ||--o{ risk_assessment : assessed
+  complaint ||--o{ risk_assessment : assessed
+  risk_assessment ||--o| critical_case : "opens"
+  critical_case ||--o{ critical_case_alert : notifies
+  app_user ||--o{ critical_case_alert : ""
+  crisis_recipient }o--|| app_user : ""
+  app_user ||--o{ sensitive_access_log : ""
 ```
 
 ## 4. 테이블 정의
@@ -561,7 +580,76 @@ erDiagram
 
 > `notice`·`calendar_event`에 `source_document_id`(FK official_document?) 컬럼을 추가해 어느 공문에서 나왔는지 추적한다.
 
-### 4.13 야간 작업 큐·정리
+### 4.13 상담·민원
+
+> 내용 컬럼(`*_enc`)은 애플리케이션에서 암호화한 값(bytea). 기록마다 데이터 키를 만들고, 그 키를 서버 마스터 키로 암호화해 `dek_enc`에 저장(봉투 암호화). 마스터 키는 DB·백업과 분리 보관. DB 권한으로도 평문을 볼 수 없다.
+
+**counseling_record** — 학생·학부모 상담(기본 비공개: 작성자만)
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| id | bigint PK | |
+| kind | text | `student`, `parent` |
+| student_id | FK student | 학번으로 식별(이름 미저장) |
+| author_id | FK app_user | |
+| counseled_at | timestamptz | |
+| method | text | `in_person`, `phone`, `online` |
+| counterpart | text? | 학부모 상담 시 관계(부/모/보호자) — 이름 저장 안 함 |
+| content_enc | bytea | 상담 내용(암호화) |
+| followup_enc | bytea? | 후속 조치 메모(암호화) |
+| dek_enc | bytea | 암호화된 데이터 키 |
+| risk_state | text | `none`, `asked_declined`(교사가 보고 안 함 선택), `reported` |
+| decline_reason | text? | 애매 판정에서 "아니오"를 고른 이유 |
+| created_at, updated_at | timestamptz | |
+
+**counseling_share** — 작성자가 직접 공유: (record_id, user_id) PK, shared_at, revoked_at?
+
+**complaint** — 민원
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| id | bigint PK | |
+| received_by | FK app_user | 접수자 |
+| complainant_type | text | `parent`, `resident`, `other` |
+| channel | text | `phone`, `visit`, `online`, `document` |
+| content_enc | bytea | 암호화 |
+| dek_enc | bytea | |
+| related_student_id | FK student? | |
+| target_teacher_id | FK app_user? | 민원 대상 교사(교권 보호 판단용) |
+| assigned_department_id | FK department? | |
+| assignee_id | FK app_user? | |
+| status | text | `received`, `assigned`, `in_progress`, `replied`, `closed` |
+| due_at | timestamptz? | 회신 기한 |
+| assigned_by | FK app_user? | 배정 확정(교감) |
+
+**risk_assessment** — 중요 사안 판별 결과(내용은 저장하지 않음)
+| id PK | source_type (`counseling`, `complaint`) | source_id bigint | categories text[] | confidence real | method (`llm`, `rule`, `self`) | evidence_summary_enc bytea (판단 근거 요약, 암호화) | outcome (`reported`, `asked_declined`, `none`) | model text? | notice_shown_at timestamptz? (저장 전 고지 표시 시각) | author_opinion text? (교사 의견) | created_at |
+
+**critical_case** — 보고된 중요 사안(사건)
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| id | bigint PK | |
+| assessment_id | FK risk_assessment UQ | |
+| categories | text[] | |
+| status | text | `received`, `responding`, `reported_external`, `closed`, `closed_false_positive` |
+| owner_id | FK app_user? | 사건 담당(상담교사·학생부장 등) |
+| external_reports | jsonb | `[{"agency":"아동보호전문기관","at":"…","by":user_id}]` |
+| checklist_state | jsonb | 신고 의무 체크리스트 진행 |
+| notes_enc | bytea? | 대응 기록(암호화, 수신자 간 공유) |
+| closed_reason | text? | |
+| opened_at, closed_at | timestamptz | |
+
+**critical_case_alert** — 수신자별 알림: (case_id, user_id) PK, notified_at, read_at?, channel (`screen`, `push`)
+
+**crisis_recipient** — 위기대응 수신자 설정
+| id PK | user_id FK | title_label text (학교별 직책명, 예: 생활안전부장) | categories text[]? (NULL이면 모든 유형) | phone text? (고지 화면 연락처 표시용) | is_active |
+
+**risk_keyword** — 키워드 규칙: id PK, category, pattern text, is_regex boolean, managed_by FK app_user, is_active
+
+**sensitive_access_log** — 상담·민원·사건 접근 기록(추가만 가능)
+| id PK | user_id FK | target_type (`counseling`, `complaint`, `critical_case`) | target_id | action (`view`, `edit`, `share`, `print`, `report`) | reason text? (수신자 열람 사유) | at timestamptz | ip inet |
+
+> 작성 교사는 자기 기록의 `sensitive_access_log`를 볼 수 있다. 상담·민원·사건 테이블은 월간 정리 대상에서 제외(보존 기간은 열린 질문).
+
+### 4.14 야간 작업 큐·정리
 
 **batch_job** — 야간 작업 큐(공문 처리·백업·정리·시간표 편성을 하나의 큐로)
 | id PK | kind (`doc_process`, `backup`, `retention`, `solver`) | ref_id bigint? | priority smallint | window text (`night` 18:00~08:00, `now`) | status (`queued`, `running`, `done`, `failed`, `deferred`) | scheduled_for timestamptz | started_at, finished_at | error text? |
@@ -572,14 +660,14 @@ erDiagram
 **retention_hold** — 정리에서 제외("보존" 표시)
 | id PK | target_type (`official_document`, `notice`, `notice_attachment` …) | target_id bigint | reason text | held_by FK app_user | until date? |
 
-### 4.14 알림
+### 4.15 알림
 
 **notification** — 개인 알림 큐
 | id PK | user_id FK | kind (`notice`, `due_reminder`, `substitution`, `question_routed`, `answer`, `approval`) | ref_type, ref_id | title | is_urgent | delivered_at? | read_at? | digest_date date? (요약 알림 묶음) |
 
 **notification_preference** — (user_id, category) PK, mode (`instant`/`digest`/`off`)
 
-### 4.15 운영
+### 4.16 운영
 
 **audit_log** — id PK, actor_id FK?, action text, target_type, target_id, detail jsonb, ip inet, created_at (추가만 가능, 수정·삭제 금지 권한)
 
@@ -604,6 +692,7 @@ erDiagram
 
 - `worker` 컨테이너의 cron이 `pg_dump -Fc`로 매일 새벽 백업 → 백업 볼륨 저장 → 암호화 → 학교 NAS로 복사 → `backup_run`에 기록.
 - 보관: 일간 7개, 주간 4개, **월간 3개(최대 약 90일)**. 저장 공간 절약 원칙에 맞춰 줄임(기능 명세 §10.1).
+- 상담·민원 내용은 이미 암호화된 상태로 덤프된다. **마스터 키는 백업에 포함하지 않고** 별도 보관(키 분실 시 복구 불가).
 - 업로드 파일(`notice_attachment`)과 처리 중인 공문(`official_document.status`가 `published`·`purged`가 아닌 것) 파일도 같은 주기로 압축 백업. 처리 끝난 공문 원본은 K-에듀파인에 원본이 있으므로 백업하지 않는다.
 
 ## 7. 월간 정리(보존 정책)
@@ -614,6 +703,7 @@ erDiagram
 - 질문·알림 로그, NEIS 수집본: 1개월 경과분 삭제(FAQ 원본 답변은 유지).
 - 교체 상세·지난 학기 초안 버전·`solver_job.input_snapshot`: 학기 종료+1개월 후 삭제(보강 누적 횟수는 요약 테이블에 보존).
 - `audit_log`: 1년 경과분 삭제.
+- **제외**: `counseling_record`, `complaint`, `risk_assessment`, `critical_case`, `sensitive_access_log`는 월간 정리 대상이 아니다.
 - 삭제 후 `VACUUM (ANALYZE)` 실행, 결과는 `retention_run`에 기록.
 - 월 1회 자동 복원 테스트: 임시 DB 컨테이너에 최신 백업 복원 → 주요 테이블 행 수·체크섬 비교 → `backup_run(kind='restore_test')` 기록.
 - 장기적으로 WAL 아카이빙(시점 복구, PITR) 도입 검토.
