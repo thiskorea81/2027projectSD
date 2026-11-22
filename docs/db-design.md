@@ -34,7 +34,8 @@
 | 학사일정 | `calendar_event` |
 | 질문 라우팅 | `question`, `question_routing`, `answer`, `faq`, `topic_owner`, `document_chunk` |
 | 알림 | `notification`, `notification_preference` |
-| 운영 | `audit_log`, `backup_run`, `app_setting`, `external_sync_run` |
+| 공문 자동 처리 | `doc_folder`, `official_document`, `doc_analysis`, `doc_category`, `duty_assignment`, `doc_assignment`, `doc_action` |
+| 운영 | `audit_log`, `backup_run`, `app_setting`, `external_sync_run`, `batch_job`, `retention_run`, `retention_hold` |
 
 ## 3. ERD
 
@@ -108,6 +109,25 @@ erDiagram
   notice ||--o{ document_chunk : "embedded as"
   faq ||--o{ document_chunk : "embedded as"
   app_user ||--o{ notification : receives
+```
+
+### 3.4 공문 자동 처리
+
+```mermaid
+erDiagram
+  department ||--o{ doc_folder : has
+  doc_folder ||--o{ official_document : contains
+  official_document ||--o| doc_analysis : analyzed
+  doc_category ||--o{ doc_analysis : classifies
+  department ||--o{ doc_category : defines
+  term ||--o{ duty_assignment : has
+  app_user ||--o{ duty_assignment : "is in charge"
+  official_document ||--o{ doc_assignment : "assignee suggestions"
+  app_user ||--o{ doc_assignment : suggested
+  official_document ||--o{ doc_action : produces
+  doc_action }o--o| notice : "creates"
+  doc_action }o--o| calendar_event : "creates"
+  official_document ||--o{ document_chunk : "indexed as"
 ```
 
 ## 4. 테이블 정의
@@ -480,7 +500,7 @@ erDiagram
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | id | bigint PK | |
-| source_type | text | `notice`, `faq`, `regulation`, `notice_qna` |
+| source_type | text | `notice`, `faq`, `regulation`, `notice_qna`, `official_doc` |
 | source_id | bigint | |
 | chunk_no | int | |
 | content | text | |
@@ -489,14 +509,77 @@ erDiagram
 
 > 인덱스: `embedding`에 HNSW 인덱스. 검색 시 질문자 권한으로 `visibility` 필터를 먼저 적용해 보지 못할 문서가 답변 근거로 쓰이지 않게 한다.
 
-### 4.12 알림
+### 4.12 공문 자동 처리
+
+**doc_folder** — 부서별 공문 폴더
+| id PK | department_id FK | inbox_path text (예: `공문/교무부/받은공문`) | done_path text | auto_publish_info_only boolean (`참고만` 자동 발행, 기본 false) | reviewer_user_id FK app_user? (지정 검토자, 없으면 부서장) |
+
+**official_document** — 수집된 공문
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| id | bigint PK | |
+| folder_id | FK doc_folder | |
+| file_path | text? | 현재 위치. 정리(삭제) 후 NULL |
+| original_name | text | |
+| file_hash | text UQ | 중복 제거 |
+| file_type | text | `pdf`, `hwp`, `hwpx`, `image`, `zip` |
+| size_bytes | bigint | |
+| title, sender_org, doc_number | text? | 기본정보(LLM 추출, 검토자 수정 가능) |
+| issued_on | date? | 시행일자 |
+| extracted_text | text? | 정리 시 삭제 |
+| status | text | `queued`, `extracting`, `analyzing`, `pending_review`, `published`, `rejected`, `needs_attention`, `purged` |
+| priority | text | `normal`, `urgent`("지금 처리") |
+| received_at | timestamptz | 폴더에 들어온 시각 |
+| processed_at, reviewed_at | timestamptz? | |
+| reviewed_by | FK app_user? | |
+| purge_after | date? | 정리 예정일(연결된 할 일 완료·마감 기준으로 계산) |
+| purged_at | timestamptz? | |
+
+**doc_analysis** — LLM 분석 결과(공문당 최신 1개, 재분석 시 교체)
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| document_id | PK, FK official_document | |
+| summary | text | 3줄 요약 |
+| todo_items | jsonb | `[{"what":"…","due":"2026-12-05","evidence":"원문 문장"}]` |
+| handling_type | text | `info_only`, `notice_needed`, `submission`, `event` |
+| category_ids | bigint[] | doc_category |
+| target_rule | jsonb | F-NOTI 대상 규칙 초안 |
+| confidence | jsonb | 항목별 신뢰도 |
+| model | text | 사용한 모델·프롬프트 버전 |
+| reviewer_edits | jsonb? | 검토자가 바꾼 내용(정확도 개선용) |
+
+**doc_category** — 업무 분류표: id PK, department_id FK, name, keywords text[], is_active
+
+**duty_assignment** — 업무분장표(학기별, 엑셀 가져오기)
+| id PK | term_id FK | user_id FK app_user | department_id FK | duty_name text (예: 방과후학교) | keywords text[] | is_primary boolean (정/부 담당) |
+
+**doc_assignment** — 담당자 추천과 확정
+| id PK | document_id FK | user_id FK app_user | rank smallint | reason text | source (`duty_table`, `history`, `manual`) | is_final boolean |
+
+**doc_action** — 자동화 결과물(초안 → 확인 시 발행)
+| id PK | document_id FK | kind (`task`, `notice`, `calendar`, `index`, `file_move`, `digest`) | status (`draft`, `applied`, `discarded`) | payload jsonb | notice_id FK notice? | calendar_event_id FK calendar_event? | applied_at timestamptz? |
+
+> `notice`·`calendar_event`에 `source_document_id`(FK official_document?) 컬럼을 추가해 어느 공문에서 나왔는지 추적한다.
+
+### 4.13 야간 작업 큐·정리
+
+**batch_job** — 야간 작업 큐(공문 처리·백업·정리·시간표 편성을 하나의 큐로)
+| id PK | kind (`doc_process`, `backup`, `retention`, `solver`) | ref_id bigint? | priority smallint | window text (`night` 18:00~08:00, `now`) | status (`queued`, `running`, `done`, `failed`, `deferred`) | scheduled_for timestamptz | started_at, finished_at | error text? |
+
+**retention_run** — 월간 정리 실행 기록
+| id PK | run_month date | started_at | finished_at | status | deleted_counts jsonb (대상별 건수) | freed_bytes bigint | preview_shown_at timestamptz (관리자 사전 확인) |
+
+**retention_hold** — 정리에서 제외("보존" 표시)
+| id PK | target_type (`official_document`, `notice`, `notice_attachment` …) | target_id bigint | reason text | held_by FK app_user | until date? |
+
+### 4.14 알림
 
 **notification** — 개인 알림 큐
 | id PK | user_id FK | kind (`notice`, `due_reminder`, `substitution`, `question_routed`, `answer`, `approval`) | ref_type, ref_id | title | is_urgent | delivered_at? | read_at? | digest_date date? (요약 알림 묶음) |
 
 **notification_preference** — (user_id, category) PK, mode (`instant`/`digest`/`off`)
 
-### 4.13 운영
+### 4.15 운영
 
 **audit_log** — id PK, actor_id FK?, action text, target_type, target_id, detail jsonb, ip inet, created_at (추가만 가능, 수정·삭제 금지 권한)
 
@@ -520,12 +603,22 @@ erDiagram
 ## 6. 백업·복구 설계
 
 - `worker` 컨테이너의 cron이 `pg_dump -Fc`로 매일 새벽 백업 → 백업 볼륨 저장 → 암호화 → 학교 NAS로 복사 → `backup_run`에 기록.
-- 보관: 일간 7개, 주간 4개, 월간 12개(오래된 것 자동 정리).
-- 업로드 파일(`notice_attachment`) 디렉터리도 같은 주기로 압축 백업.
+- 보관: 일간 7개, 주간 4개, **월간 3개(최대 약 90일)**. 저장 공간 절약 원칙에 맞춰 줄임(기능 명세 §10.1).
+- 업로드 파일(`notice_attachment`)과 처리 중인 공문(`official_document.status`가 `published`·`purged`가 아닌 것) 파일도 같은 주기로 압축 백업. 처리 끝난 공문 원본은 K-에듀파인에 원본이 있으므로 백업하지 않는다.
+
+## 7. 월간 정리(보존 정책)
+
+- 매월 1일 야간 `batch_job(kind='retention')`. 전날 삭제 예정 목록을 관리자에게 보여주고(`retention_run.preview_shown_at`), `retention_hold` 항목은 제외.
+- 공문: `purge_after <= today`이고 연결된 `doc_action`의 할 일이 모두 완료·마감 경과인 것 → 파일 삭제, `extracted_text`·`doc_analysis.summary` 외 상세·`document_chunk` 삭제, `status='purged'`, `file_path=NULL`. 제목·발신기관·문서번호·담당자는 남김.
+- 안내: 마감+1개월 경과·미완료 없음 → 첨부 파일 삭제, `notice_recipient`를 완료율 요약으로 대체 후 삭제.
+- 질문·알림 로그, NEIS 수집본: 1개월 경과분 삭제(FAQ 원본 답변은 유지).
+- 교체 상세·지난 학기 초안 버전·`solver_job.input_snapshot`: 학기 종료+1개월 후 삭제(보강 누적 횟수는 요약 테이블에 보존).
+- `audit_log`: 1년 경과분 삭제.
+- 삭제 후 `VACUUM (ANALYZE)` 실행, 결과는 `retention_run`에 기록.
 - 월 1회 자동 복원 테스트: 임시 DB 컨테이너에 최신 백업 복원 → 주요 테이블 행 수·체크섬 비교 → `backup_run(kind='restore_test')` 기록.
 - 장기적으로 WAL 아카이빙(시점 복구, PITR) 도입 검토.
 
-## 7. 열린 질문 (DB 관련)
+## 8. 열린 질문 (DB 관련)
 
 1. ~~**ORM/마이그레이션 도구**~~ → **결정(2026-11-22): Prisma + raw SQL 마이그레이션 병행** (§1).
 2. ~~**학생 데이터 범위**~~ → **결정(2026-11-22): 학번만 저장, 이름은 저장하지 않음** (§4.2).
