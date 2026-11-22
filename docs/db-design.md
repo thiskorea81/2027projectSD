@@ -268,8 +268,23 @@ erDiagram
 
 ### 4.6 시간표 편성(솔버)
 
-**request_reason_category** — 요청 사유 범주와 계수
-| id PK | name (육아, 건강, 대학원, 기타…) | weight_factor numeric | requires_evidence boolean |
+**priority_policy** — 인사자문위원회가 의결한 학기별 우선순위 정책
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| id | bigint PK | |
+| term_id | FK term | |
+| version | smallint | 같은 학기 안에서 재의결 시 증가 |
+| decided_on | date | 위원회 의결일 |
+| minutes_file_path | text? | 회의록 첨부 |
+| max_requests_per_teacher | smallint | 교사당 요청 상한 |
+| max_strong_requests | smallint | 교사당 "강한 요청" 상한 |
+| fairness_bonus_enabled | boolean | 직전 학기 반영률 보정 사용 여부 |
+| status | text | `draft`, `active`, `superseded` |
+| entered_by | FK app_user | 입력한 시간표 담당자 |
+| locked_at | timestamptz? | 요청 수집 시작 시 잠금 |
+
+**request_reason_category** — 요청 사유 범주와 계수(정책 버전에 속함)
+| id PK | policy_id FK priority_policy | name (육아, 건강, 대학원, 기타…) | weight_factor numeric | requires_evidence boolean |
 
 **teacher_request** — 교사 요청(희망/회피 조건)
 | 컬럼 | 타입 | 설명 |
@@ -335,7 +350,7 @@ erDiagram
 | kind | text | `swap`, `cover`(보강), `self_study`(자습 감독), `cancel` |
 | substitute_user_id | FK app_user? | |
 | room_id | FK room? | |
-| status | text | `proposed`, `accepted`(상대 수락), `approved`, `cancelled` |
+| status | text | `proposed`, `accepted`(상대 수락), `approved`(담당자 승인, 필수), `rejected`, `cancelled` |
 | approved_by | FK app_user? | |
 | UQ | (date, original_slot_id) where status='approved' | |
 
