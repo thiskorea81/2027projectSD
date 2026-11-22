@@ -1,4 +1,5 @@
-# NVIDIA 그래픽카드가 있는 컴퓨터에서 AI 를 GPU 로 돌릴 때 덧붙이는 구성
+# NVIDIA 그래픽카드가 있는 Linux/Windows 컴퓨터에서 컨테이너 Ollama 를 GPU 로 돌릴 때 덧붙이는 구성
+# (.env 에 COMPOSE_PROFILES=ollama, OLLAMA_URL=http://ollama:11434 필요. 맥에는 해당 없음)
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 # (Linux 는 NVIDIA Container Toolkit, Windows 는 Docker Desktop + WSL2 + 최신 NVIDIA 드라이버 필요)
 services:

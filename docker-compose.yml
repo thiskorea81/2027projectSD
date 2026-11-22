@@ -10,7 +10,11 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      OLLAMA_URL: http://ollama:11434
+      # 기본: 맥미니(호스트)에서 직접 실행 중인 Ollama. 컨테이너 Ollama 를 쓰면 .env 에서 바꿉니다.
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      # Linux 에서도 host.docker.internal 이 동작하도록 (Mac/Windows 는 기본 제공)
+      - "host.docker.internal:host-gateway"
     ports:
       - "${APP_PORT:-3000}:3000"
     volumes:
@@ -56,11 +60,15 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ---------- 로컬 AI 서버 (Ollama) ----------
-  # 외부 AI API 를 쓰지 않고 이 컴퓨터 안에서 언어 모델을 돌립니다.
+  # ---------- 로컬 AI 서버 (Ollama, 컨테이너판 · 선택) ----------
+  # 맥(Apple Silicon)은 Docker 안에서 GPU(Metal)를 못 쓰므로 Ollama 를 맥에 직접 설치해 씁니다.
+  # 이 컨테이너는 Linux/NVIDIA 서버용입니다. 켜려면 .env 에서
+  #   COMPOSE_PROFILES=ollama
+  #   OLLAMA_URL=http://ollama:11434
   # 모델 받기: docker compose exec ollama ollama pull ${OLLAMA_MODEL}
   ollama:
     image: ollama/ollama:latest
+    profiles: ["ollama"]
     environment:
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
     ports:

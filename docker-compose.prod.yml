@@ -1,13 +1,41 @@
 # 운영(학교 서버 등) 배포용 덮어쓰기 구성
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# 외부(집·휴대폰)에서는 Caddy(HTTPS)로만 접속하고,
+# 앱·DB·AI 포트는 서버 바깥으로 열지 않습니다.
 services:
   app:
     build:
       target: prod
     environment:
       NODE_ENV: production
+    ports: !reset []
     volumes: !reset []
     restart: unless-stopped
 
   db:
     ports: !reset []
+
+  ollama:
+    ports: !reset []
+
+  # ---------- HTTPS 리버스 프록시 (Caddy, 인증서 자동 발급·갱신) ----------
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN 을 .env 에 설정하세요}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

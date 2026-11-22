@@ -1,6 +1,6 @@
 // 로컬 AI 서버(Ollama) 호출 도우미. 외부 AI API 는 사용하지 않습니다.
-const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://ollama:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:4b";
+const OLLAMA_URL = process.env.OLLAMA_URL ?? "http://host.docker.internal:11434";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma3:12b";
 
 export async function aiStatus() {
   const res = await fetch(`${OLLAMA_URL}/api/tags`, { cache: "no-store" });
