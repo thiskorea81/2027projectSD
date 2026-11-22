@@ -63,8 +63,7 @@ services:
   # ---------- 로컬 AI 서버 (Ollama, 컨테이너판 · 선택) ----------
   # 맥(Apple Silicon)은 Docker 안에서 GPU(Metal)를 못 쓰므로 Ollama 를 맥에 직접 설치해 씁니다.
   # 이 컨테이너는 Linux/NVIDIA 서버용입니다. 켜려면 .env 에서
-  #   COMPOSE_PROFILES=ollama
-  #   OLLAMA_URL=http://ollama:11434
+  #   COMPOSE_PROFILES 에 ollama 추가,  OLLAMA_URL=http://ollama:11434
   # 모델 받기: docker compose exec ollama ollama pull ${OLLAMA_MODEL}
   ollama:
     image: ollama/ollama:latest

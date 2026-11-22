@@ -5,22 +5,16 @@
 - 웹 앱: Next.js (TypeScript)
 - 데이터베이스: PostgreSQL 17
 - AI: Ollama (로컬 언어 모델, 외부 AI API 사용 안 함)
-- 외부 접속: Caddy (HTTPS 자동 인증서) — 집·휴대폰에서도 접속
+- 외부 접속: Cloudflare Tunnel 또는 Caddy (HTTPS) — 학교 안 서버에 집·휴대폰에서도 접속
 - 웹·DB·백업은 Docker 로 실행되므로, 다른 컴퓨터로 옮겨도 같은 환경이 그대로 재현됩니다.
 
 ## 서버 구성 (맥미니 24GB 한 대)
 
 맥미니 한 대가 웹·DB·AI·백업을 모두 돌립니다.
 
-```
- 집·휴대폰 ──HTTPS──▶ ┌──────────── 맥미니 (macOS) ─────────────┐
-                      │  Docker Desktop (VM 메모리 6~8GB)        │
-                      │   caddy ─▶ app ─▶ db ◀─ db-backup        │
-                      │              │                           │
-                      │              └─▶ host.docker.internal    │
-                      │  Ollama (맥에 직접 설치, Metal GPU 사용) ◀┘
-                      └──────────────────────────────────────────┘
-```
+- **Docker Desktop** (VM 메모리 6~8GB): `cloudflared` 또는 `caddy` → `app` → `db` ← `db-backup`
+- **맥에 직접 설치한 Ollama** (Metal GPU 사용): `app` 이 `host.docker.internal:11434` 로 접속
+- 집·휴대폰 → (HTTPS) → `cloudflared`/`caddy` → `app`
 
 **왜 Ollama 만 Docker 밖에 두나요?** 맥용 Docker 는 맥의 GPU(Metal)를 쓰지 못합니다.
 컨테이너 안에서 AI 를 돌리면 CPU 로만 돌아 매우 느리기 때문에, Ollama 는 맥에 직접 설치하고
@@ -43,7 +37,7 @@
 | `db` | PostgreSQL | `localhost:5432` (이 컴퓨터에서만) |
 | `db-backup` | DB 자동 백업 (기본 24시간마다, 14일 보관) | `./backups` 폴더 |
 | Ollama (맥 네이티브) | 로컬 AI | http://localhost:11434 |
-| `caddy` | HTTPS 리버스 프록시 (운영 배포 시에만) | https://도메인 |
+| `cloudflared` / `caddy` | 외부 접속 (운영 배포 시에만, 둘 중 하나) | https://도메인 |
 | `adminer` | 웹 DB 관리 도구 (선택) | http://localhost:8080 |
 
 ## 준비물
@@ -109,21 +103,45 @@ sh scripts/db-restore.sh backups/db-20261122-130000.sql.gz
 ```
 현재 DB 의 테이블을 백업 시점 내용으로 덮어씁니다.
 
-## 운영 배포 (집·휴대폰에서 접속)
+## 운영 배포 (학교 안 맥미니, 집·휴대폰에서 접속)
 
-### 1. 사전 준비
-- **도메인**: 예) `notice.myschool.kr` 을 맥미니의 공인 IP 로 연결 (DNS A 레코드)
-- **포트 개방**: 공유기/학교 방화벽에서 80, 443 포트를 맥미니로 포워딩
-  (학교 정보부·전산 담당과 협의 필요. 외부 포트 개방이 안 되면 Cloudflare Tunnel 같은 터널 방식을 대안으로 검토)
-- `.env` 에서 `DOMAIN=notice.myschool.kr`, `POSTGRES_PASSWORD` 를 강한 값으로 변경
+서버는 학교 안에 둡니다. 외부에서 접속하는 방법은 두 가지이고, `.env` 의 `COMPOSE_PROFILES` 로 고릅니다.
+어느 쪽이든 앱·DB 포트는 외부에 열지 않고, `POSTGRES_PASSWORD` 는 강한 값으로 바꾸세요.
 
-### 2. 실행
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-```
+### 방법 A: Cloudflare Tunnel (권장 — 학교 방화벽 포트 개방 불필요)
 
-- Caddy 가 Let's Encrypt 인증서를 자동으로 받고 갱신합니다. http 는 https 로 자동 이동합니다.
-- 앱은 최적화된 운영 이미지(일반 사용자 권한)로 실행되고, **앱·DB 포트는 외부에 열지 않습니다** (Caddy 의 80/443 만 열림).
+맥미니가 Cloudflare 쪽으로 **밖으로 나가는 연결**만 맺기 때문에, 학교 전산망에 포트를 열어 달라고 요청하지 않아도 됩니다. HTTPS 인증서도 Cloudflare 가 처리합니다.
+
+1. 도메인 하나를 준비해 Cloudflare(무료 요금제)에 등록합니다.
+2. Cloudflare 대시보드 → Zero Trust → Networks → Tunnels → **Create a tunnel** (Cloudflared 선택)
+3. 설치 화면에 나오는 **토큰**을 복사해 `.env` 에 넣습니다.
+   ```
+   COMPOSE_PROFILES=tunnel
+   CLOUDFLARE_TUNNEL_TOKEN=eyJ...
+   ```
+4. 같은 화면의 **Public Hostname** 에 `notice.내도메인` → Service `HTTP` / `app:3000` 을 추가합니다.
+5. 실행:
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+   docker compose logs cloudflared    # "Registered tunnel connection" 이 보이면 연결 완료
+   ```
+
+> 학교 망이 외부 터널 연결 자체를 막는 경우도 있으니, 정보부·전산 담당에게 한 번 확인하세요.
+
+### 방법 B: Caddy + 포트 개방 (학교에서 80/443 포트를 열어 줄 때)
+
+1. 도메인을 학교 공인 IP 로 연결(DNS A 레코드)하고, 학교 방화벽에서 80·443 포트를 맥미니로 포워딩합니다.
+2. `.env`:
+   ```
+   COMPOSE_PROFILES=caddy
+   DOMAIN=notice.myschool.kr
+   ```
+3. 실행: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`
+   Caddy 가 Let's Encrypt 인증서를 자동으로 받고 갱신하며, http 는 https 로 자동 이동합니다.
+
+### 공통
+- 앱은 최적화된 운영 이미지(일반 사용자 권한)로 실행됩니다.
+- 모든 컨테이너는 `restart: unless-stopped` 라 Docker 가 다시 켜지면 자동으로 올라옵니다.
 - 자동 백업은 그대로 동작합니다.
 - 로그인은 학교 Google Workspace 계정으로 붙일 예정입니다 (별도 작업).
 
@@ -156,12 +174,12 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 4. `/api/health` 가 `"status":"ok"` 인지 확인하면 끝입니다.
 
 npm 패키지 버전은 `package-lock.json`, Node·PostgreSQL 버전은 `Dockerfile`·`docker-compose.yml` 에 고정되어 있어 두 컴퓨터의 환경이 같게 유지됩니다.
-(HTTPS 인증서는 새 서버에서 자동으로 다시 발급됩니다. 도메인의 IP 만 새 서버로 바꾸세요.)
+(Cloudflare Tunnel 은 같은 토큰을 쓰면 새 서버로 그대로 이어집니다. 기존 서버의 cloudflared 는 먼저 끄세요. Caddy 방식이면 도메인의 IP 만 새 서버로 바꾸면 인증서는 자동 재발급됩니다.)
 
 ### 새 컴퓨터가 맥이 아닌 경우 (Linux / Windows + NVIDIA)
 Ollama 를 컨테이너로 돌릴 수 있습니다. `.env` 에서:
 ```
-COMPOSE_PROFILES=ollama
+COMPOSE_PROFILES=ollama          # 운영이면 tunnel,ollama 처럼 이어 쓰기
 OLLAMA_URL=http://ollama:11434
 ```
 그리고 GPU 를 쓰려면:
@@ -178,4 +196,5 @@ Windows 에서 `scripts/*.sh` 는 Git Bash 또는 WSL 터미널에서 실행하�
 - **포트가 이미 사용 중**: `.env` 에서 `APP_PORT`, `DB_PORT` 등을 다른 번호로 바꾸고 `docker compose up -d`.
 - **코드를 고쳐도 화면이 안 바뀜**: `.env` 에서 `WATCHPACK_POLLING=true` 후 `docker compose up -d`.
 - **패키지가 꼬였을 때**: `docker compose down && docker volume rm school-notice_node_modules && docker compose up -d`
-- **HTTPS 인증서 발급 실패**: 도메인이 맥미니 IP 를 가리키는지, 80·443 포트가 외부에서 열려 있는지 확인. `docker compose logs caddy`
+- **터널이 연결되지 않음**: `docker compose logs cloudflared` 에서 토큰 오류인지, 학교 망이 연결을 막는지 확인.
+- **HTTPS 인증서 발급 실패 (Caddy)**: 도메인이 맥미니 IP 를 가리키는지, 80·443 포트가 외부에서 열려 있는지 확인. `docker compose logs caddy`
