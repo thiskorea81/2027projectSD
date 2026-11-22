@@ -1,0 +1,5 @@
+# Windows 와 Mac/Linux 사이를 오가도 셸 스크립트가 깨지지 않도록 줄바꿈을 LF 로 고정합니다.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
