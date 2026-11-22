@@ -12,7 +12,11 @@
 - **원본 + 변경 이력 분리**: 기본 시간표(`timetable_slot`)와 교체(`substitution`)를 분리하고, "실제 시간표"는 뷰/쿼리로 합친다.
 - **대상 지정은 규칙으로 저장 후 수신자 확정(스냅샷)**: 발송 시점의 수신자 명단을 `notice_recipient`에 확정해 이후 인사 변동과 무관하게 이력이 보존된다.
 - **열거형**: 자주 바뀔 수 있는 값은 참조 테이블, 고정적인 상태값은 PostgreSQL `enum` 또는 `text + check`.
-- 마이그레이션 도구는 ORM(Prisma 또는 Drizzle) 결정 후 확정(열린 질문 §7).
+- **ORM: Prisma + raw SQL 마이그레이션 병행**(2026-11-22 확정).
+  - 테이블·컬럼·일반 관계·인덱스는 Prisma 스키마(`schema.prisma`)로 관리하고 `prisma migrate`로 마이그레이션을 만든다.
+  - Prisma가 표현하지 못하는 것은 같은 마이그레이션 폴더에 SQL로 직접 추가한다: pgvector 확장과 `vector` 컬럼·HNSW 인덱스(Prisma에서는 `Unsupported("vector(1024)")`), 부분 유니크 인덱스(`WHERE` 조건), 트리거(`updated_at`, 확정 버전 겹침 검증), 뷰(`v_daily_timetable` 등), `check` 제약.
+  - 벡터 검색·뷰 조회처럼 Prisma 쿼리로 불편한 곳은 `prisma.$queryRaw`(타입 지정)로 작성한다.
+  - 규칙: 스키마를 바꿀 때는 항상 `prisma migrate dev --create-only`로 마이그레이션을 만든 뒤 필요한 SQL을 덧붙이고 적용한다. DB를 직접 고치지 않는다.
 
 ## 2. 모듈 구성
 
@@ -521,7 +525,7 @@ erDiagram
 
 ## 7. 열린 질문 (DB 관련)
 
-1. **ORM/마이그레이션 도구**: Prisma vs Drizzle. (pgvector·부분 유니크·트리거를 많이 쓰므로 SQL 마이그레이션을 직접 쓸 수 있는 Drizzle 또는 Prisma + raw SQL 마이그레이션 병행을 추천)
+1. ~~**ORM/마이그레이션 도구**~~ → **결정(2026-11-22): Prisma + raw SQL 마이그레이션 병행** (§1).
 2. **학생 데이터 범위**: 학점제 블록 편성을 위해 학생별 수강 신청이 필요하다. 학생 이름까지 저장할지, 학번만 저장할지?
 3. **임베딩 모델과 벡터 차원**: Mac mini 24GB 기준으로 bge-m3(1024차원) 가정. 실측 후 확정.
 4. **학기 중 시간표 변경**: 학기 중간에 기본 시간표가 바뀌는 경우(`effective_from`)가 실제로 있는지, 아니면 교체만으로 충분한지?
