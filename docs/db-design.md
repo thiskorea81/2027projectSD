@@ -135,9 +135,12 @@ erDiagram
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | id | bigint PK | |
-| email | text UQ | Google Workspace 계정 이메일(로그인 식별자) |
-| google_sub | text? UQ | Google 계정 고유 ID(OIDC `sub`), 첫 로그인 시 저장 |
-| password_hash | text? | 비상용 로컬 관리자만 사용, 그 외 NULL |
+| login_id | text UQ | 1단계 아이디 = 한글 이름, 중복 시 `홍길동2`… 등록 순(생성 후 변경 불가) |
+| password_hash | text? | 로컬 로그인용(1단계 전원, 2단계는 비상용 관리자만) |
+| must_change_password | boolean | 첫 로그인 비밀번호 변경 강제 |
+| failed_login_count | smallint | 5회 실패 시 잠금 |
+| email | text? UQ | Google Workspace 계정 이메일(2단계 연결 시) |
+| google_sub | text? UQ | Google 계정 고유 ID(OIDC `sub`), 2단계 연결 시 저장 |
 | name | text | |
 | phone | text? | |
 | main_subject_id | FK subject? | 주 담당 교과 |
