@@ -175,10 +175,13 @@ erDiagram
 **homeroom_assignment** — 담임/부담임
 | id PK | class_id FK grade_class | user_id FK app_user | kind (`main`/`assistant`) |
 
-**student** — 학생 (최소 정보)
-| id PK | student_no text (학번) | name | is_active |
+**student** — 학생 (**학번만 저장, 이름 저장 안 함** — 2026-11-22 확정)
+| id PK | is_active boolean | created_at |
 
-**class_enrollment** — (class_id, student_id) PK, `seat_no`
+> 학생 이름·연락처 등 개인정보는 저장하지 않는다. 학번(예: 20315 = 2학년 3반 15번)은 해마다 바뀌므로 학생 행에는 두지 않고 학기별 소속(`class_enrollment`)에 둔다. 해가 바뀌어도 같은 학생으로 이어 보려면 새 학년 엑셀 가져오기 때 "이전 학번" 열로 연결한다.
+
+**class_enrollment** — 학기별 소속과 학번
+| class_id FK grade_class | student_id FK student | student_no text (학번) | PK(class_id, student_id) | UQ(학기, student_no) |
 
 ### 4.3 교육과정
 
@@ -526,7 +529,7 @@ erDiagram
 ## 7. 열린 질문 (DB 관련)
 
 1. ~~**ORM/마이그레이션 도구**~~ → **결정(2026-11-22): Prisma + raw SQL 마이그레이션 병행** (§1).
-2. **학생 데이터 범위**: 학점제 블록 편성을 위해 학생별 수강 신청이 필요하다. 학생 이름까지 저장할지, 학번만 저장할지?
+2. ~~**학생 데이터 범위**~~ → **결정(2026-11-22): 학번만 저장, 이름은 저장하지 않음** (§4.2).
 3. **임베딩 모델과 벡터 차원**: Mac mini 24GB 기준으로 bge-m3(1024차원) 가정. 실측 후 확정.
 4. **학기 중 시간표 변경**: 학기 중간에 기본 시간표가 바뀌는 경우(`effective_from`)가 실제로 있는지, 아니면 교체만으로 충분한지?
 5. **교사 계정 연도 이관**: 전출입 교사 처리 방식(계정 비활성화 vs 삭제) — 이력 보존을 위해 비활성화를 기본값으로 제안.
