@@ -80,21 +80,45 @@ ollama list                          # 받은 AI 모델 목록
 
 ## 백업과 복원
 
-### 자동 백업
-`db-backup` 서비스가 켜질 때 한 번, 그 뒤 `BACKUP_INTERVAL_HOURS`(기본 24) 시간마다
-`BACKUP_DIR`(기본 `./backups`)에 `db-날짜-시간.sql.gz` 파일을 만듭니다.
-`BACKUP_KEEP_DAYS`(기본 14) 일보다 오래된 파일은 자동으로 지웁니다.
+### 자동 백업 (맥미니 + NAS 이중 저장)
+`db-backup` 서비스가 켜질 때 한 번, 그 뒤 `BACKUP_INTERVAL_HOURS`(기본 24) 시간마다 백업합니다.
 
-맥미니 자체가 고장 나는 경우에 대비해 `.env` 의 `BACKUP_DIR` 을 **외장 디스크나 NAS, 클라우드 동기화 폴더**로 지정하세요.
-(예: `BACKUP_DIR=/Volumes/Backup/school-notice`. Docker Desktop → Settings → Resources → File sharing 에 그 경로가 허용되어 있어야 합니다.)
+| 위치 | 설정 | 보관 기간 |
+| --- | --- | --- |
+| 1차: 맥미니 안 | `BACKUP_DIR` (기본 `./backups`) | `BACKUP_KEEP_DAYS` (기본 14일) |
+| 2차: NAS | `NAS_BACKUP_DIR` | `NAS_BACKUP_KEEP_DAYS` (기본 90일) |
+
+맥미니가 고장 나도 NAS 에 백업이 남아 있도록, 운영 서버에서는 꼭 NAS 를 연결하세요.
 
 ```bash
-docker compose logs db-backup        # 백업 기록 확인
+docker compose logs db-backup        # 백업 기록 확인 (NAS 복사 성공/실패도 여기 표시)
 ```
+
+### NAS 연결하기 (맥미니, 처음 한 번)
+1. NAS 에 백업용 공유 폴더를 만듭니다. (예: 공유 폴더 `backup` 안에 `school-notice` 폴더)
+2. 맥 Finder → 이동 → **서버에 연결**(⌘K) → `smb://NAS주소/backup` 접속, "이 암호를 키체인에 저장" 체크
+3. 재부팅 후에도 자동 연결되도록: 시스템 설정 → 일반 → **로그인 항목**에 마운트된 `backup` 공유 폴더를 추가
+4. 표식 파일을 한 번 만듭니다. 이 파일이 있을 때만 NAS 가 "연결됨"으로 인식됩니다.
+   ```bash
+   mkdir -p /Volumes/backup/school-notice
+   touch /Volumes/backup/school-notice/.school-notice-backup
+   ```
+5. `.env` 에 경로를 넣고 백업 서비스를 다시 시작합니다.
+   ```
+   NAS_BACKUP_DIR=/Volumes/backup/school-notice
+   ```
+   ```bash
+   docker compose up -d db-backup
+   docker compose logs db-backup     # "NAS 복사 완료" 가 보이면 성공
+   ```
+6. Docker Desktop → Settings → Resources → **File sharing** 에 `/Volumes` 가 포함되어 있는지 확인하세요.
+
+> NAS 가 꺼지거나 연결이 끊겨도 맥미니 쪽 백업은 계속 쌓이고, 로그에 `⚠️ NAS 미연결` 경고가 남습니다.
+> (표식 파일 확인 덕분에 NAS 가 끊긴 상태에서 엉뚱한 빈 폴더에 저장되는 일은 없습니다.)
 
 ### 지금 바로 백업
 ```bash
-sh scripts/db-backup.sh              # backups/db-...-manual.sql.gz 생성
+sh scripts/db-backup.sh              # backups/db-...-manual.sql.gz 생성 (NAS 연결 시 NAS 에도 복사)
 ```
 
 ### 복원
@@ -159,10 +183,10 @@ sh scripts/db-restore.sh backups/db-20261122-130000.sql.gz
    git push                          # 코드
    sh scripts/db-backup.sh           # DB → backups/…-manual.sql.gz
    ```
-2. 다음 두 가지를 USB·클라우드 등으로 새 컴퓨터에 복사합니다. (Git 에는 올라가지 않는 파일들)
+2. 다음 두 가지를 새 컴퓨터로 가져갑니다. (Git 에는 올라가지 않는 파일들)
    - `.env`
-   - 방금 만든 백업 파일
-3. **새 컴퓨터에서** Docker Desktop, Ollama, Git 을 설치하고 (Docker 메모리 6~8GB 설정):
+   - 방금 만든 백업 파일 (NAS 에도 복사되어 있으므로 새 컴퓨터에서 NAS 를 연결해 바로 가져와도 됩니다)
+3. **새 컴퓨터에서** Docker Desktop, Ollama, Git 을 설치하고 (Docker 메모리 6~8GB 설정), 위 "NAS 연결하기"의 2~3단계를 해 둡니다:
    ```bash
    ollama pull gemma3:12b            # AI 모델은 다시 받기
    git clone https://github.com/thiskorea81/2027projectSD.git
@@ -193,6 +217,8 @@ Windows 에서 `scripts/*.sh` 는 Git Bash 또는 WSL 터미널에서 실행하�
 
 - **`/api/health` 에서 `ai.status` 가 unreachable**: 맥에서 Ollama 앱이 실행 중인지 확인 (`ollama list`).
 - **`ai.modelReady` 가 false**: `ollama pull <.env 의 OLLAMA_MODEL>` 을 실행하세요. 앱 자체는 모델 없이도 동작합니다.
+- **로그에 `NAS 미연결` 경고**: Finder 에서 NAS 공유 폴더가 마운트되어 있는지, `NAS_BACKUP_DIR` 안에 `.school-notice-backup` 파일이 있는지 확인.
+- **맥미니가 고장 났을 때**: 새 컴퓨터에서 NAS 의 가장 최근 `db-*.sql.gz` 로 `sh scripts/db-restore.sh` 를 실행하세요.
 - **포트가 이미 사용 중**: `.env` 에서 `APP_PORT`, `DB_PORT` 등을 다른 번호로 바꾸고 `docker compose up -d`.
 - **코드를 고쳐도 화면이 안 바뀜**: `.env` 에서 `WATCHPACK_POLLING=true` 후 `docker compose up -d`.
 - **패키지가 꼬였을 때**: `docker compose down && docker volume rm school-notice_node_modules && docker compose up -d`

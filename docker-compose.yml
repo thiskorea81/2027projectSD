@@ -45,7 +45,8 @@ services:
     restart: unless-stopped
 
   # ---------- DB 자동 백업 ----------
-  # 시작 시 1회 + BACKUP_INTERVAL_HOURS 마다 BACKUP_DIR 에 .sql.gz 파일을 남깁니다.
+  # 시작 시 1회 + BACKUP_INTERVAL_HOURS 마다 BACKUP_DIR(맥미니) 에 .sql.gz 를 남기고,
+  # NAS_BACKUP_DIR 이 설정되어 있으면 NAS 에도 복사합니다.
   db-backup:
     image: postgres:17-alpine
     env_file: .env
@@ -55,6 +56,7 @@ services:
     volumes:
       - ./docker/backup-loop.sh:/backup-loop.sh:ro
       - ${BACKUP_DIR:-./backups}:/backups
+      - ${NAS_BACKUP_DIR:-./backups/.nas-unset}:/nas
     depends_on:
       db:
         condition: service_healthy
