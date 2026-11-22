@@ -371,9 +371,11 @@ erDiagram
 | due_at | timestamptz? | 마감 |
 | is_mandatory | boolean | 알림 끌 수 없음 |
 | requires_completion | boolean | 할 일(완료 체크) 여부 |
-| status | text | `draft`, `pending_approval`, `published`, `closed`, `cancelled` |
-| approval_required | boolean | 전체 발송 기준 초과 시 true |
-| approved_by | FK app_user? | |
+| status | text | `draft`, `classifying`, `pending_review`(작성자 확인 대기), `published`, `closed`, `cancelled` |
+| auto_classified | boolean | 전체 발송 자동 분류를 거쳤는지 |
+| classification | jsonb? | LLM이 추론한 대상 규칙·이유·신뢰도(작성자 수정 전 원본) |
+| is_all_mandatory | boolean | 필수 전체 공지(분류 없이 전원) |
+| mandatory_set_by | FK app_user? | 필수 전체 공지로 지정한 관리자 |
 | published_at | timestamptz? | |
 
 **notice_target** — 대상 규칙(여러 행 = OR, 한 행 안의 조건 = AND)
@@ -389,7 +391,10 @@ erDiagram
 |---|---|---|
 | notice_id | FK notice | PK(notice_id, user_id) |
 | user_id | FK app_user | |
+| relevance | text | `action`(해야 함), `info`(참고) — 자동 분류 결과 또는 작성자 지정 |
+| relevance_reason | text? | 분류 이유(작성자 미리보기용) |
 | state | text | `unread`, `read`, `done`, `not_applicable` |
+| feedback_irrelevant | boolean | 수신자가 "나와 관계없음"을 눌렀는지(분류 학습용) |
 | read_at, done_at | timestamptz? | |
 | last_reminded_at | timestamptz? | |
 
@@ -485,7 +490,7 @@ erDiagram
 
 **external_sync_run** — NEIS 등 외부 수집 기록: id PK, source (`neis_meal`, `neis_calendar`), started_at, status, rows, error
 
-**app_setting** — key text PK, value jsonb (전체 발송 기준 인원, LLM 임계값, NEIS 코드 등)
+**app_setting** — key text PK, value jsonb (자동 분류 신뢰도 임계값, 미확인 시 자동 발송 대기 시간, LLM 임계값, NEIS 코드 등)
 
 ## 5. 주요 조회 시나리오와 인덱스
 
