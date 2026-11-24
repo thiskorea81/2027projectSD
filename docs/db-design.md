@@ -34,7 +34,8 @@
 | 학사일정 | `calendar_event` |
 | 질문 라우팅 | `question`, `question_routing`, `answer`, `faq`, `topic_owner`, `document_chunk` |
 | 알림 | `notification`, `notification_preference` |
-| 공문 자동 처리 | `doc_folder`, `official_document`, `doc_analysis`, `doc_category`, `duty_assignment`, `doc_assignment`, `doc_action` |
+| 공문 자동 처리 | `doc_folder`, `official_document`, `doc_analysis`, `doc_category`, `doc_assignment`, `doc_action` |
+| 업무분장 | `duty_plan`, `duty_position`, `duty_holder`, `duty_group`, `duty_item`, `duty_group_category`, `duty_review` |
 | 상담·민원 | `counseling_record`, `counseling_share`, `complaint`, `risk_assessment`, `critical_case`, `critical_case_alert`, `crisis_recipient`, `risk_keyword`, `sensitive_access_log` |
 | 운영 | `audit_log`, `backup_run`, `app_setting`, `external_sync_run`, `batch_job`, `retention_run`, `retention_hold` |
 
@@ -121,8 +122,8 @@ erDiagram
   official_document ||--o| doc_analysis : analyzed
   doc_category ||--o{ doc_analysis : classifies
   department ||--o{ doc_category : defines
-  term ||--o{ duty_assignment : has
-  app_user ||--o{ duty_assignment : "is in charge"
+  duty_group }o--o{ doc_category : "matches (duty_group_category)"
+  duty_position ||--o{ doc_assignment : "suggested via"
   official_document ||--o{ doc_assignment : "assignee suggestions"
   app_user ||--o{ doc_assignment : suggested
   official_document ||--o{ doc_action : produces
@@ -190,8 +191,8 @@ erDiagram
 | max_weekly_hours | smallint? | 주당 최대 시수 |
 | is_active | boolean | 전출·퇴직 시 false(삭제하지 않음). 비활성 계정은 로그인 불가, 수신자·담당자 후보에서 제외, 과거 기록에는 이름 유지 |
 
-**department** — 부서 (교무부, 학생부, 과학과 등; `kind`로 행정부서/교과협의회 구분)
-| id PK | name | kind (`admin`/`subject`) | parent_id FK department? |
+**department** — 조직 단위 (팀 → 부서 2단계 + 교과협의회; [업무분장 문서](./duty-assignment.md) §2.1)
+| id PK | name | kind (`team` 팀 / `admin` 행정부서 / `grade` 학년부 / `subject` 교과협의회) | parent_id FK department? (부서 → 팀) | grade smallint? (학년부만) | sort_order | is_active |
 
 **user_department** — (user_id, department_id) PK, `is_head` boolean(부장 여부)
 
@@ -431,7 +432,7 @@ erDiagram
 |---|---|---|
 | id | bigint PK | |
 | notice_id | FK notice | |
-| target_type | text | `all`, `user`, `grade`, `class`, `department`, `role`, `homeroom`, `subject`, `group` |
+| target_type | text | `all`, `user`, `grade`, `class`, `department`, `role`, `homeroom`, `subject`, `group`, `duty` (특정 업무군 담당자들, 예: 각 학년 출결 담당) |
 | target_ref | jsonb | 예: `{"grade":2,"homeroom":true}`, `{"user_ids":[..]}`, `{"group_id":3}` |
 
 **notice_recipient** — 발행 시점에 확정된 수신자와 개인별 상태
@@ -501,7 +502,7 @@ erDiagram
 **question_routing** — 사람에게 전달된 기록(재전달 포함)
 | id PK | question_id FK | assignee_id FK app_user | rule text (`owner`, `homeroom`, `topic`, `manual`) | routed_at | responded_at? | escalated boolean |
 
-**topic_owner** — 주제→담당 매핑
+**topic_owner** — 주제→담당 매핑 (업무분장 `duty_group`에서 찾지 못하는 예외만; 기본은 업무분장 매칭)
 | id PK | topic text (출결, 방과후, 생기부…) | department_id FK | user_id FK? (특정 담당자) | keywords text[] |
 
 **faq**
@@ -570,16 +571,43 @@ erDiagram
 
 **doc_category** — 업무 분류표: id PK, department_id FK, name, keywords text[], is_active
 
-**duty_assignment** — 업무분장표(학기별, 엑셀 가져오기)
-| id PK | term_id FK | user_id FK app_user | department_id FK | duty_name text (예: 방과후학교) | keywords text[] | is_primary boolean (정/부 담당) |
+> 업무분장은 §4.12-1에 따로 정의한다(`duty_*`). 담당자 추천은 `duty_group`·`duty_item`과 매칭한다.
 
 **doc_assignment** — 담당자 추천과 확정
-| id PK | document_id FK | user_id FK app_user | rank smallint | reason text | source (`duty_table`, `history`, `manual`) | is_final boolean |
+| id PK | document_id FK | user_id FK app_user | duty_group_id FK duty_group? (매칭된 업무군) | rank smallint | reason text | source (`duty_table`, `history`, `manual`) | is_final boolean |
 
 **doc_action** — 자동화 결과물(초안 → 확인 시 발행)
 | id PK | document_id FK | kind (`task`, `notice`, `calendar`, `index`, `file_move`, `digest`) | status (`draft`, `applied`, `discarded`) | payload jsonb | notice_id FK notice? | calendar_event_id FK calendar_event? | applied_at timestamptz? |
 
 > `notice`·`calendar_event`에 `source_document_id`(FK official_document?) 컬럼을 추가해 어느 공문에서 나왔는지 추적한다.
+
+### 4.12-1 업무분장
+
+> 원본 표(부 → 계 → 담당자 → 업무군 → 세부업무)를 그대로 옮긴 구조. 배경과 가져오기 규칙은 [업무분장 문서](./duty-assignment.md).
+
+**duty_plan** — 한 학년도의 업무분장표(판)
+| id PK | school_id FK | year int (학년도) | title text | status (`draft` 작성 중 / `review` 돌아보기 중 / `final` 확정) | source_file text? (가져온 파일 이름, 파일 자체는 보관 안 함) | finalized_at timestamptz? |
+- 부분 UQ: (school_id, year) 중 `status='final'`은 하나.
+
+**duty_position** — 계(자리). 담당자는 자리에 붙는다
+| id PK | plan_id FK duty_plan | department_id FK department | name text (부장, 교무학사1, 1-3담임) | is_head boolean (부서총괄 자리) | grade_class_id FK grade_class? (학년부 담임 자리) | sort_order |
+
+**duty_holder** — 자리 ↔ 교사 (한 사람이 여러 자리 가능, 학기 중 교체 대비)
+| id PK | position_id FK | user_id FK app_user | is_primary boolean (기본 true) | start_date date? | end_date date? |
+- 현재 담당 = `end_date IS NULL OR end_date >= today`.
+
+**duty_group** — 업무군
+| id PK | position_id FK | name text (부서총괄, 학년 출결) | level (`lead` 총괄·기획 / `practice` 실무 / `support` 지원) | scope jsonb (`{"grade":2,"classes":[1,2,3,4]}`, 비면 부서 범위) | keywords text[] | embedding vector(1024)? (이름+세부업무 문장) | sort_order |
+
+**duty_item** — 세부업무 한 줄
+| id PK | group_id FK | body text | sort_order | origin (`imported`, `added_by_review`, `manual`) |
+
+**duty_group_category** — 업무군 ↔ 공문 분류표(`doc_category`) N:M: (duty_group_id, category_id) PK, weight real
+
+**duty_review** — 돌아보기 회신(①추가한 일 / ②하지 않은 일)
+| id PK | plan_id FK (돌아보는 학년도) | user_id FK app_user | group_id FK duty_group | item_id FK duty_item? (`not_done`일 때) | kind (`added` / `not_done`) | body text? (추가한 일 문장) | evidence jsonb? (시스템이 제안한 근거 공문·안내 id) | source (`self`, `suggested`, `hwpx_color`) | submitted_at |
+
+인덱스: `duty_holder(user_id)`, `duty_group USING gin(keywords)`, `duty_group USING hnsw(embedding)`, `duty_position(plan_id, department_id)`.
 
 ### 4.13 상담·민원
 
