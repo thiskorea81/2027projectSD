@@ -134,3 +134,11 @@ volumes:
   ollama_data:
   node_modules:
   next_cache:
+
+# 컨테이너 내부망 주소 범위. Docker 기본값(172.17~172.31)은 학교망(172.18.x 등)과 겹칠 수 있어
+# 학교망과 겹치지 않는 10.x 대역으로 고정합니다. 겹치면 .env 의 DOCKER_SUBNET 을 바꾸세요.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET:-10.213.0.0/24}
