@@ -1,0 +1,16 @@
+# 외부(집·휴대폰) 접속용 HTTPS 리버스 프록시
+# DOMAIN 에 실제 도메인을 넣으면 Let's Encrypt 인증서를 자동으로 받고 갱신합니다.
+# DOMAIN=localhost 이면 이 컴퓨터용 자체 인증서로 동작합니다 (테스트용).
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy app:3000
+}

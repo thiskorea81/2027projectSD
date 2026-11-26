@@ -1,0 +1,144 @@
+# 개발용 구성: docker compose up
+name: school-notice
+
+services:
+  # ---------- 웹 앱 (Next.js) ----------
+  app:
+    build:
+      context: .
+      target: dev
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # 기본: 맥미니(호스트)에서 직접 실행 중인 Ollama. 컨테이너 Ollama 를 쓰면 .env 에서 바꿉니다.
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      # 첨부파일 저장 위치 (컨테이너 안 경로). 실제 파일은 맥미니의 UPLOADS_DIR 폴더에 저장됩니다.
+      UPLOAD_DIR: /data/uploads
+      # 부서별 공문서 폴더 (읽기 전용)
+      DOCUMENTS_DIR: /data/documents
+    extra_hosts:
+      # Linux 에서도 host.docker.internal 이 동작하도록 (Mac/Windows 는 기본 제공)
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - next_cache:/app/.next
+      - ${UPLOADS_DIR:-./data/uploads}:/data/uploads
+      - ${DOCUMENTS_DIR:-./data/documents}:/data/documents:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ---------- 데이터베이스 (PostgreSQL 17 + pgvector) ----------
+  db:
+    image: pgvector/pgvector:pg17
+    env_file: .env
+    environment:
+      TZ: Asia/Seoul
+      PGTZ: Asia/Seoul
+    ports:
+      # 호스트의 DB 도구로 접속할 때 사용. 이 컴퓨터에서만 접속 가능하게 묶어 둡니다.
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./docker/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------- DB 자동 백업 ----------
+  # 시작 시 1회 + 매일 BACKUP_TIME(기본 03:00)에 BACKUP_DIR(맥미니) 에 DB 백업(.sql.gz)을 남기고,
+  # NAS_BACKUP_DIR 이 설정되어 있으면 DB 백업 복사 + 첨부파일 동기화를 NAS 에 합니다.
+  db-backup:
+    image: pgvector/pgvector:pg17
+    env_file: .env
+    environment:
+      TZ: Asia/Seoul
+    entrypoint: ["sh", "/backup-loop.sh"]
+    volumes:
+      - ./docker/backup-loop.sh:/backup-loop.sh:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+      - ${NAS_BACKUP_DIR:-./backups/.nas-unset}:/nas
+      - ${UPLOADS_DIR:-./data/uploads}:/uploads:ro
+      - ${DOCUMENTS_DIR:-./data/documents}:/documents:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------- 야간 작업 워커 ----------
+  # 업무시간 외(WORKER_ACTIVE_FROM ~ WORKER_ACTIVE_UNTIL, 기본 18:00~08:00)에만
+  # 부서 공문 폴더의 새 문서를 로컬 AI 로 분류·담당자 지정 등 처리하고, 월 1회 불필요한 자료를 정리합니다.
+  # (정리 때문에 워커만 공문 폴더 쓰기 권한을 가집니다. 앱은 읽기 전용. 처리 로직은 worker/ 에서 개발)
+  worker:
+    build:
+      context: .
+      target: dev
+    env_file: .env
+    environment:
+      TZ: Asia/Seoul
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      UPLOAD_DIR: /data/uploads
+      DOCUMENTS_DIR: /data/documents
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # 의존성 설치는 app 컨테이너가 하므로, 설치가 끝날 때까지 기다렸다가 시작합니다.
+    entrypoint: ["sh", "-c", "until [ -f node_modules/.package-lock.sha256 ]; do sleep 2; done; exec \"$$@\"", "--"]
+    command: ["npm", "run", "worker"]
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - ${UPLOADS_DIR:-./data/uploads}:/data/uploads
+      - ${DOCUMENTS_DIR:-./data/documents}:/data/documents
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
+    restart: unless-stopped
+
+  # ---------- 로컬 AI 서버 (Ollama, 컨테이너판 · 선택) ----------
+  # 맥(Apple Silicon)은 Docker 안에서 GPU(Metal)를 못 쓰므로 Ollama 를 맥에 직접 설치해 씁니다.
+  # 이 컨테이너는 Linux/NVIDIA 서버용입니다. 켜려면 .env 에서
+  #   COMPOSE_PROFILES 에 ollama 추가,  OLLAMA_URL=http://ollama:11434
+  # 모델 받기: docker compose exec ollama ollama pull ${OLLAMA_MODEL}
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  # ---------- 웹 DB 관리 도구 (선택) ----------
+  # docker compose --profile tools up -d adminer
+  adminer:
+    image: adminer:5
+    profiles: ["tools"]
+    ports:
+      - "127.0.0.1:${ADMINER_PORT:-8080}:8080"
+    depends_on:
+      - db
+
+volumes:
+  db_data:
+  ollama_data:
+  node_modules:
+  next_cache:
+
+# 컨테이너 내부망 주소 범위. Docker 기본값(172.17~172.31)은 학교망(172.18.x 등)과 겹칠 수 있어
+# 학교망과 겹치지 않는 10.x 대역으로 고정합니다. 겹치면 .env 의 DOCKER_SUBNET 을 바꾸세요.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET:-10.213.0.0/24}
