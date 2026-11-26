@@ -35,6 +35,7 @@
 | 질문 라우팅 | `question`, `question_routing`, `answer`, `faq`, `topic_owner`, `document_chunk` |
 | 알림 | `notification`, `notification_preference` |
 | 공문 자동 처리 | `doc_folder`, `official_document`, `doc_analysis`, `doc_category`, `doc_assignment`, `doc_action` |
+| 학습지원 SW 선정 | `edtech_product`, `edtech_policy_snapshot`, `edtech_cycle`, `edtech_criteria_set`, `edtech_criterion`, `edtech_request`, `edtech_review`, `edtech_check`, `edtech_opinion`, `edtech_deliberation`, `edtech_generated_form` |
 | 업무분장 | `duty_plan`, `duty_position`, `duty_holder`, `duty_group`, `duty_item`, `duty_group_category`, `duty_review` |
 | 상담·민원 | `counseling_record`, `counseling_share`, `complaint`, `risk_assessment`, `critical_case`, `critical_case_alert`, `crisis_recipient`, `risk_keyword`, `sensitive_access_log` |
 | 운영 | `audit_log`, `backup_run`, `app_setting`, `external_sync_run`, `batch_job`, `retention_run`, `retention_hold` |
@@ -609,6 +610,50 @@ erDiagram
 
 인덱스: `duty_holder(user_id)`, `duty_group USING gin(keywords)`, `duty_group USING hnsw(embedding)`, `duty_position(plan_id, department_id)`.
 
+### 4.12-2 학습지원 소프트웨어 선정 (F-EDTECH)
+
+> 절차와 판정 규칙은 [학습지원 SW 문서](./learning-software.md). 학생 개인정보는 들어오지 않는다. 이 모듈 행은 월간 정리(§7) 대상에서 제외.
+
+**edtech_product** — 제품(회차와 무관하게 계속 쓰는 목록)
+| id PK | school_id FK | name text | aliases text[] (다른 표기, 자동완성·중복 합치기) | vendor text | service_url text | policy_url text? | is_public_made boolean (교육부·교육청 제작) | is_foreign boolean | portal (`none`/`keris`/`special_ed`) | content_kind (`curriculum_content` 교과 콘텐츠 포함 / `tool` 도구형 / `unknown`) | vendor_contact text? (업체 대표 창구 1개) | edzip_checked_at date? | edzip_url text? | is_active boolean |
+- UQ: (school_id, lower(name)). `aliases`는 GIN 인덱스.
+
+**edtech_policy_snapshot** — 개인정보처리방침 수집본
+| id PK | product_id FK | fetched_at | source (`url`/`upload`) | file_path text? | text_hash text | body text | sections jsonb (항목 제목 → 시작 위치) | changed_from_id FK self? |
+- 월 1회 재수집, 해시가 같으면 새 행을 만들지 않고 `fetched_at`만 갱신.
+
+**edtech_cycle** — 선정 회차(학운위 1회분)
+| id PK | school_id FK | year int (학년도) | term int? | title text | committee_date date? | survey_notice_id FK notice? | survey_due date? | opinion_due date? | criteria_set_id FK | status (`draft` / `collecting` 수요조사 / `checking` 기준 확인 / `agenda` 안건 확정 / `deliberated` 심의 완료 / `closed`) | minutes_file_path text? | conflict_checked_at date? | conflict_summary text? ("위원 7명 확인, 제척 0건" — 위원 명단은 저장 안 함) |
+
+**edtech_criteria_set** / **edtech_criterion** — 학교 선정기준(회차별 확정본)
+- set: id PK, school_id FK, year, copied_from_id FK self?, locked_at timestamptz?
+- criterion: id PK, set_id FK, kind (`required`/`optional`), code text ("1-1", "S2-1"), area text (최소처리 원칙 준수 …), body text, conditional boolean ("필요시" 문항), source (`guideline`/`example`/`school`), sort_order
+- 필수 9문항은 `source='guideline'`, 삭제 불가(트리거 검사).
+
+**edtech_request** — 교사 신청(수요조사 응답·수시 신청)
+| id PK | cycle_id FK? (수시 신청은 다음 회차 배정 전 NULL) | product_id FK | user_id FK app_user | grades int[] | subject_id FK subject? | period text (1학기·연간) | usage (`class_student` 수업 중 학생 / `assignment` 과제 제출 / `teacher_only` 교사 전용 / `after_school` 방과후) | student_account boolean | student_data_input boolean | has_vendor_content boolean | reason text | continued_from_id FK self? ("계속 사용") | status (`submitted`/`withdrawn`) | submitted_at |
+
+**edtech_review** — 회차 × 제품 판정(신청 여러 건을 합친 단위)
+| id PK | cycle_id FK | product_id FK | applicability (`target_detail` 개별 / `target_simple` 간소화 / `not_target` / `needs_check`) | applicability_reason jsonb (적용 규칙·FAQ 번호) | required_result (`met`/`not_met`/`pending`) | optional_result (`met`/`partly`/`not_met`/`pending`) | recommendation text (선정이유 초안 → 담당자 수정) | decision (`approved`/`approved_modified`/`excluded`/`held`)? | decision_reason text? | deviate_from_committee boolean (심의와 다르게 시행) | deviation_reported_at date? | valid_until date? |
+- UQ: (cycle_id, product_id).
+- 승인 목록 뷰 `v_edtech_approved`: `decision IN ('approved','approved_modified') AND (NOT deviate_from_committee OR deviation_reported_at IS NOT NULL)` 중 최신 회차, 유효 기간 내.
+
+**edtech_check** — 문항별 판정과 증빙
+| id PK | review_id FK | criterion_id FK | result (`met`/`not_met`/`na`/`unknown`) | suggested_by (`llm`/`rule`/`vendor`/`edzip`/`staff`) | evidence_text text? (원문 그대로) | snapshot_id FK edtech_policy_snapshot? | evidence_offset int? | evidence_file_path text? | evidence_url text? | confidence real? | na_reason text? | confirmed_by FK app_user? | confirmed_at timestamptz? |
+- 한 문항에 출처별 여러 행 가능. 확정 행은 (review_id, criterion_id)당 하나(부분 UQ `WHERE confirmed_at IS NOT NULL`).
+- check 제약: `result='met' AND confirmed_at IS NOT NULL` 이면 evidence_text·evidence_file_path·evidence_url 중 하나 필수.
+
+**edtech_opinion** — 교과협의회 선택기준 의견
+| id PK | review_id FK | criterion_id FK | user_id FK app_user | result (`met`/`not_met`/`na`) | comment text? | submitted_at |
+
+**edtech_deliberation** — 심의 의견서(원안과 다를 때, [서식4])
+| id PK | cycle_id FK | original text | modified text | reason text | created_by FK app_user |
+
+**edtech_generated_form** — 만든 서식 파일 기록
+| id PK | cycle_id FK | review_id FK? | form (`form1`/`form2`/`form3`/`form4`/`deviation_report`) | file_path text | template_version text | created_by FK | created_at |
+
+인덱스: `edtech_request(cycle_id, product_id)`, `edtech_request(user_id)`, `edtech_check(review_id, criterion_id)`, `edtech_product USING gin(aliases)`.
+
 ### 4.13 상담·민원
 
 > 내용 컬럼(`*_enc`)은 애플리케이션에서 암호화한 값(bytea). 기록마다 데이터 키를 만들고, 그 키를 서버 마스터 키로 암호화해 `dek_enc`에 저장(봉투 암호화). 마스터 키는 DB·백업과 분리 보관. DB 권한으로도 평문을 볼 수 없다.
@@ -681,7 +726,7 @@ erDiagram
 ### 4.14 야간 작업 큐·정리
 
 **batch_job** — 야간 작업 큐(공문 처리·백업·정리·시간표 편성을 하나의 큐로)
-| id PK | kind (`doc_process`, `backup`, `retention`, `solver`) | ref_id bigint? | priority smallint | window text (`night` 18:00~08:00, `now`) | status (`queued`, `running`, `done`, `failed`, `deferred`) | scheduled_for timestamptz | started_at, finished_at | error text? |
+| id PK | kind (`doc_process`, `backup`, `retention`, `solver`, `edtech_policy` 처리방침 수집·LLM 판정) | ref_id bigint? | priority smallint | window text (`night` 18:00~08:00, `now`) | status (`queued`, `running`, `done`, `failed`, `deferred`) | scheduled_for timestamptz | started_at, finished_at | error text? |
 
 **retention_run** — 월간 정리 실행 기록
 | id PK | run_month date | started_at | finished_at | status | deleted_counts jsonb (대상별 건수) | freed_bytes bigint | preview_shown_at timestamptz (관리자 사전 확인) |
@@ -732,7 +777,7 @@ erDiagram
 - 질문·알림 로그, NEIS 수집본: 1개월 경과분 삭제(FAQ 원본 답변은 유지).
 - 교체 상세·지난 학기 초안 버전·`solver_job.input_snapshot`: 학기 종료+1개월 후 삭제(보강 누적 횟수는 요약 테이블에 보존).
 - `audit_log`: 1년 경과분 삭제.
-- **제외**: `counseling_record`, `complaint`, `risk_assessment`, `critical_case`, `sensitive_access_log`는 월간 정리 대상이 아니다.
+- **제외**: `counseling_record`, `complaint`, `risk_assessment`, `critical_case`, `sensitive_access_log`, 그리고 `edtech_*`(학습지원 SW 선정 회차·판정·증빙, 법정 심의 근거)는 월간 정리 대상이 아니다. 단 수요조사 할 일(`notice_recipient`)은 일반 안내 규칙대로 정리.
 - 삭제 후 `VACUUM (ANALYZE)` 실행, 결과는 `retention_run`에 기록.
 - 월 1회 자동 복원 테스트: 임시 DB 컨테이너에 최신 백업 복원 → 주요 테이블 행 수·체크섬 비교 → `backup_run(kind='restore_test')` 기록.
 - 장기적으로 WAL 아카이빙(시점 복구, PITR) 도입 검토.
