@@ -110,7 +110,8 @@ async function main() {
     }
     case "set-password": {
       const u = await findUser(target);
-      const password = (await readStdin()).toString("utf8").replace(/\r?\n$/, "");
+      // Windows PowerShell 은 파이프 입력 앞에 BOM 을 붙이므로 지웁니다
+      const password = (await readStdin()).toString("utf8").replace(/^\uFEFF/, "").replace(/\r?\n$/, "");
       if (!password) throw new Error("표준입력으로 새 비밀번호를 주세요.");
       if (password.length < PASSWORD_MIN_LENGTH) console.log(`주의: ${PASSWORD_MIN_LENGTH}자보다 짧은 비밀번호입니다(테스트용으로만 쓰세요).`);
       await db.query(
