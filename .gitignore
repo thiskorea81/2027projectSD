@@ -12,3 +12,10 @@ backups/*
 !backups/.gitkeep
 .DS_Store
 npm-debug.log*
+
+# 교직원 명렬표·명단 원본은 개인정보라 저장소에 올리지 않습니다 (data/ 폴더에 두세요)
+/*.hwpx
+/*.hwp
+/*.csv
+/*.xlsx
+AGENTS.md

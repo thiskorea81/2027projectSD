@@ -1,0 +1,26 @@
+:root { --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --bg: #f5f5f7; --card: #fff; --accent: #0a5bd3; --danger: #c62828; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; color: var(--fg); background: var(--bg); }
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+h1 { font-size: 1.4rem; }
+a { color: var(--accent); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+.narrow { max-width: 380px; margin: 10vh auto 0; }
+label { display: block; font-size: .9rem; color: var(--muted); margin: 12px 0 4px; }
+input[type=text], input[type=password], input[type=file] { width: 100%; padding: 10px 12px; font-size: 1rem; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+button { padding: 10px 16px; font-size: 1rem; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+button.secondary { background: #fff; color: var(--accent); }
+button.small { padding: 4px 8px; font-size: .8rem; }
+button.danger { border-color: var(--danger); background: #fff; color: var(--danger); }
+button:disabled { opacity: .5; cursor: default; }
+.full { width: 100%; margin-top: 20px; }
+.error { color: var(--danger); font-size: .9rem; margin-top: 12px; }
+.ok { color: #1b7f3b; font-size: .9rem; margin-top: 12px; }
+.muted { color: var(--muted); font-size: .9rem; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td.actions form { display: inline; margin-right: 4px; }
+.tag { display: inline-block; font-size: .75rem; padding: 1px 6px; border-radius: 6px; background: #eef; margin-right: 4px; }
+.tag.warn { background: #fde7e7; color: var(--danger); }

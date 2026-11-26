@@ -19,4 +19,7 @@ else
   npm install
 fi
 
+# DB 구조 변경(마이그레이션) 적용. 이미 적용된 것은 건너뜁니다.
+node scripts/migrate.ts
+
 exec "$@"
