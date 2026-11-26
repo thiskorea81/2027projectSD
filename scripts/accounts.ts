@@ -6,6 +6,9 @@
 //       명렬표(.hwpx/.csv)로 계정을 만들거나 부서를 갱신합니다. --apply 가 없으면 미리보기만.
 //       파일 대신 '-' 를 주면 표준입력에서 읽습니다(이때 --format hwpx|csv 필요).
 //         예) docker compose exec -T app npm run accounts -- import - --format hwpx --apply < 명렬표.hwpx
+//   add <이름> [--login-id <아이디>] 한 명 추가 (아이디 생략 시 이름 규칙, 비밀번호는 INITIAL_PASSWORD)
+//   set-password <아이디|#번호>     표준입력 한 줄을 새 비밀번호로 (변경 강제 없음, 잠금 해제)
+//         예) echo 새비밀번호 | docker compose exec -T app npm run accounts -- set-password '#12'
 //   list                         계정 목록 (번호·아이디·부서·상태)
 //   admin <아이디|#번호> [--revoke] 시스템 관리자 지정/해제
 //   reset-password <아이디|#번호>  비밀번호를 초기 비밀번호로 (다음 로그인 때 변경 강제)
@@ -20,9 +23,10 @@ import pg from "pg";
 import { parseRoster } from "../lib/staff/roster.ts";
 import { applyImport, loadExistingUsers, planImport } from "../lib/staff/import.ts";
 import {
-  countActiveAdmins, deactivateUser, reactivateUser, resetPassword, setAdmin, unlockUser,
+  countActiveAdmins, deactivateUser, logEvent, reactivateUser, resetPassword, setAdmin, unlockUser,
 } from "../lib/auth/accounts.ts";
-import { normalizeLoginId } from "../lib/auth/login-id.ts";
+import { nextLoginId, normalizeLoginId } from "../lib/auth/login-id.ts";
+import { hashPassword, initialPassword, PASSWORD_MIN_LENGTH } from "../lib/auth/password.ts";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => args.includes(name);
@@ -30,7 +34,8 @@ const option = (name: string) => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
 };
-const positional = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1] === "--format"));
+const VALUE_OPTIONS = ["--format", "--login-id"];
+const positional = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && VALUE_OPTIONS.includes(args[i - 1])));
 const [command, target] = positional;
 
 const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
@@ -84,6 +89,39 @@ async function main() {
       );
       return;
     }
+    case "add": {
+      const name = target ? normalizeLoginId(target) : "";
+      if (!name) throw new Error("이름을 적어 주세요.");
+      const taken = new Set((await db.query("SELECT login_id FROM app_user")).rows.map((r) => r.login_id as string));
+      const requested = option("--login-id");
+      const loginId = requested ? normalizeLoginId(requested) : nextLoginId(name, taken);
+      if (taken.has(loginId)) throw new Error("이미 있는 아이디입니다.");
+      const { rows } = await db.query(
+        `INSERT INTO app_user (login_id, name, password_hash, must_change_password) VALUES ($1, $2, $3, true) RETURNING id::int`,
+        [loginId, name, await hashPassword(initialPassword())],
+      );
+      await db.query(
+        `INSERT INTO user_role (user_id, role_id) SELECT $1, id FROM role WHERE code = 'teacher' ON CONFLICT DO NOTHING`,
+        [rows[0].id],
+      );
+      await logEvent(db, rows[0].id, null, "account_created", { source: "cli" });
+      console.log(`#${rows[0].id} 계정을 만들었습니다 (초기 비밀번호, 첫 로그인 때 변경).`);
+      return;
+    }
+    case "set-password": {
+      const u = await findUser(target);
+      const password = (await readStdin()).toString("utf8").replace(/\r?\n$/, "");
+      if (!password) throw new Error("표준입력으로 새 비밀번호를 주세요.");
+      if (password.length < PASSWORD_MIN_LENGTH) console.log(`주의: ${PASSWORD_MIN_LENGTH}자보다 짧은 비밀번호입니다(테스트용으로만 쓰세요).`);
+      await db.query(
+        `UPDATE app_user SET password_hash = $2, must_change_password = false, password_changed_at = now(),
+           failed_login_count = 0, locked_at = NULL, updated_at = now() WHERE id = $1`,
+        [u.id, await hashPassword(password)],
+      );
+      await logEvent(db, u.id, null, "password_set", { source: "cli" });
+      console.log(`#${u.id} 비밀번호를 설정했습니다.`);
+      return;
+    }
     case "list": {
       const { rows } = await db.query(`
         SELECT u.id, u.login_id, u.is_active, u.locked_at IS NOT NULL AS locked, u.must_change_password,
@@ -132,7 +170,7 @@ async function main() {
       return;
     }
     default:
-      console.log("사용법은 scripts/accounts.ts 맨 위 설명을 보세요. 명령: import, list, admin, reset-password, unlock, deactivate, activate");
+      console.log("사용법은 scripts/accounts.ts 맨 위 설명을 보세요. 명령: import, add, set-password, list, admin, reset-password, unlock, deactivate, activate");
       process.exitCode = command ? 1 : 0;
   }
 }

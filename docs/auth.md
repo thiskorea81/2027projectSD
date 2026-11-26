@@ -40,6 +40,8 @@
    docker compose exec app npm run accounts -- reset-password '#12'
    docker compose exec app npm run accounts -- unlock '#12'
    docker compose exec app npm run accounts -- deactivate '#12'
+   docker compose exec app npm run accounts -- add 홍길동                  # 한 명 추가
+   echo 새비밀번호 | docker compose exec -T app npm run accounts -- set-password '#12'   # 비밀번호 직접 지정
    ```
    Windows PowerShell 처럼 한글 입력이 깨질 수 있는 터미널에서는 `list` 로 번호를 보고 `#번호` 로 지정하세요.
 
