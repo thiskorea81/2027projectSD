@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import "./globals.css";
 
 export const metadata = {
   title: "학교 알림",
@@ -8,9 +9,7 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko">
-      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0, padding: 24 }}>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

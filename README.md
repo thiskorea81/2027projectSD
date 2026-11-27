@@ -81,6 +81,23 @@ ollama list                          # 받은 AI 모델 목록
 
 > `docker compose down -v` 는 **DB 데이터까지 삭제**합니다. 꼭 백업 후에만 쓰세요.
 
+## 로그인과 교직원 계정 (1단계 임시 계정)
+
+교내망 IP 접속 단계에서는 아이디·비밀번호로 로그인합니다. 자세한 규칙은 [docs/auth.md](docs/auth.md).
+
+1. `.env` 에 `INITIAL_PASSWORD=` (학교에서 정한 초기 비밀번호)를 넣고 `docker compose up -d` 로 다시 시작합니다.
+   초기 비밀번호는 저장소·화면 어디에도 적지 않습니다.
+2. 교직원 명렬표(.hwpx 또는 CSV)를 `data/` 폴더에 넣고 계정을 만듭니다. (`data/` 는 Git 에 올라가지 않습니다)
+
+   ```bash
+   docker compose exec app npm run accounts -- import data/명렬표.hwpx           # 미리보기
+   docker compose exec app npm run accounts -- import data/명렬표.hwpx --apply   # 반영
+   docker compose exec app npm run accounts -- list                              # 번호 확인
+   docker compose exec app npm run accounts -- admin '#번호'                     # 관리자 지정
+   ```
+
+3. 관리자로 로그인하면 **계정 관리** 화면에서 명렬표 다시 올리기, 비밀번호 초기화, 잠금 해제, 전출 교사 비활성화를 할 수 있습니다.
+
 ## 데이터 폴더
 
 | 폴더 (`.env`) | 기본값 | 내용 | 연결 |

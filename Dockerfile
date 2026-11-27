@@ -32,7 +32,6 @@ RUN npm run build
 FROM base AS worker
 ENV NODE_ENV=production TZ=Asia/Seoul
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
-COPY --chown=node:node package.json ./
 COPY --chown=node:node lib ./lib
 COPY --chown=node:node worker ./worker
 USER node
@@ -48,6 +47,10 @@ ENV NODE_ENV=production \
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/public ./public
+# 시작 시 마이그레이션 실행 + 계정 관리 스크립트(npm run accounts)용
+COPY --chown=node:node db ./db
+COPY --chown=node:node lib ./lib
+COPY --chown=node:node scripts ./scripts
 USER node
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "node scripts/migrate.ts && exec node server.js"]
